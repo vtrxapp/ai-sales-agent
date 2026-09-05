@@ -78,6 +78,152 @@ export type Database = {
           },
         ]
       }
+      business_research_notes: {
+        Row: {
+          business_id: string
+          confidence: number | null
+          digital_presence: Json
+          id: string
+          inferences: Json
+          model: string
+          observations: Json
+          recommendations: Json
+          researched_at: string
+          researched_by: string | null
+          source_urls: Json
+        }
+        Insert: {
+          business_id: string
+          confidence?: number | null
+          digital_presence?: Json
+          id?: string
+          inferences?: Json
+          model: string
+          observations?: Json
+          recommendations?: Json
+          researched_at?: string
+          researched_by?: string | null
+          source_urls?: Json
+        }
+        Update: {
+          business_id?: string
+          confidence?: number | null
+          digital_presence?: Json
+          id?: string
+          inferences?: Json
+          model?: string
+          observations?: Json
+          recommendations?: Json
+          researched_at?: string
+          researched_by?: string | null
+          source_urls?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "business_research_notes_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "business_research_notes_researched_by_fkey"
+            columns: ["researched_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      businesses: {
+        Row: {
+          city: string | null
+          country: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          discovered_at: string
+          email: string | null
+          id: string
+          industry: string | null
+          last_researched_at: string | null
+          location: string | null
+          name: string
+          name_normalized: string
+          phone: string | null
+          phone_normalized: string | null
+          pipeline_status: Database["public"]["Enums"]["pipeline_status"]
+          social_links: Json
+          source: string
+          source_url: string | null
+          updated_at: string
+          website: string | null
+          website_normalized: string | null
+          whatsapp_number: string | null
+          whatsapp_status: Database["public"]["Enums"]["whatsapp_status"]
+        }
+        Insert: {
+          city?: string | null
+          country?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          discovered_at?: string
+          email?: string | null
+          id?: string
+          industry?: string | null
+          last_researched_at?: string | null
+          location?: string | null
+          name: string
+          name_normalized: string
+          phone?: string | null
+          phone_normalized?: string | null
+          pipeline_status?: Database["public"]["Enums"]["pipeline_status"]
+          social_links?: Json
+          source: string
+          source_url?: string | null
+          updated_at?: string
+          website?: string | null
+          website_normalized?: string | null
+          whatsapp_number?: string | null
+          whatsapp_status?: Database["public"]["Enums"]["whatsapp_status"]
+        }
+        Update: {
+          city?: string | null
+          country?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          discovered_at?: string
+          email?: string | null
+          id?: string
+          industry?: string | null
+          last_researched_at?: string | null
+          location?: string | null
+          name?: string
+          name_normalized?: string
+          phone?: string | null
+          phone_normalized?: string | null
+          pipeline_status?: Database["public"]["Enums"]["pipeline_status"]
+          social_links?: Json
+          source?: string
+          source_url?: string | null
+          updated_at?: string
+          website?: string | null
+          website_normalized?: string | null
+          whatsapp_number?: string | null
+          whatsapp_status?: Database["public"]["Enums"]["whatsapp_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "businesses_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaigns: {
         Row: {
           budget: number | null
@@ -143,6 +289,219 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contacts: {
+        Row: {
+          business_id: string
+          created_at: string
+          created_by: string | null
+          email: string | null
+          id: string
+          job_title: string | null
+          name: string
+          phone: string | null
+          social_url: string | null
+          source: string
+          updated_at: string
+          verification_status: Database["public"]["Enums"]["contact_verification_status"]
+          whatsapp_number: string | null
+          whatsapp_status: Database["public"]["Enums"]["whatsapp_status"]
+        }
+        Insert: {
+          business_id: string
+          created_at?: string
+          created_by?: string | null
+          email?: string | null
+          id?: string
+          job_title?: string | null
+          name: string
+          phone?: string | null
+          social_url?: string | null
+          source: string
+          updated_at?: string
+          verification_status?: Database["public"]["Enums"]["contact_verification_status"]
+          whatsapp_number?: string | null
+          whatsapp_status?: Database["public"]["Enums"]["whatsapp_status"]
+        }
+        Update: {
+          business_id?: string
+          created_at?: string
+          created_by?: string | null
+          email?: string | null
+          id?: string
+          job_title?: string | null
+          name?: string
+          phone?: string | null
+          social_url?: string | null
+          source?: string
+          updated_at?: string
+          verification_status?: Database["public"]["Enums"]["contact_verification_status"]
+          whatsapp_number?: string | null
+          whatsapp_status?: Database["public"]["Enums"]["whatsapp_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contacts_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contacts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      lead_scores: {
+        Row: {
+          business_id: string
+          business_potential_score: number
+          classification: Database["public"]["Enums"]["lead_classification"]
+          confidence: number | null
+          contactability_score: number
+          created_at: string
+          digital_problems_score: number
+          growth_potential_score: number
+          id: string
+          industry_fit_score: number
+          missing_functionality_score: number
+          model: string
+          other_score: number
+          reasoning: Json
+          scored_at: string
+          scored_by: string | null
+          total_score: number
+          updated_at: string
+        }
+        Insert: {
+          business_id: string
+          business_potential_score: number
+          classification: Database["public"]["Enums"]["lead_classification"]
+          confidence?: number | null
+          contactability_score: number
+          created_at?: string
+          digital_problems_score: number
+          growth_potential_score: number
+          id?: string
+          industry_fit_score: number
+          missing_functionality_score: number
+          model: string
+          other_score: number
+          reasoning?: Json
+          scored_at?: string
+          scored_by?: string | null
+          total_score: number
+          updated_at?: string
+        }
+        Update: {
+          business_id?: string
+          business_potential_score?: number
+          classification?: Database["public"]["Enums"]["lead_classification"]
+          confidence?: number | null
+          contactability_score?: number
+          created_at?: string
+          digital_problems_score?: number
+          growth_potential_score?: number
+          id?: string
+          industry_fit_score?: number
+          missing_functionality_score?: number
+          model?: string
+          other_score?: number
+          reasoning?: Json
+          scored_at?: string
+          scored_by?: string | null
+          total_score?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_scores_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: true
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_scores_scored_by_fkey"
+            columns: ["scored_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      opportunities: {
+        Row: {
+          business_id: string
+          confidence: number | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          estimated_value: number | null
+          id: string
+          opportunity_type: Database["public"]["Enums"]["opportunity_type"]
+          priority: Database["public"]["Enums"]["opportunity_priority"]
+          problem: string | null
+          proposed_solution: string | null
+          source: string
+          status: Database["public"]["Enums"]["opportunity_status"]
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          business_id: string
+          confidence?: number | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          estimated_value?: number | null
+          id?: string
+          opportunity_type: Database["public"]["Enums"]["opportunity_type"]
+          priority?: Database["public"]["Enums"]["opportunity_priority"]
+          problem?: string | null
+          proposed_solution?: string | null
+          source?: string
+          status?: Database["public"]["Enums"]["opportunity_status"]
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          business_id?: string
+          confidence?: number | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          estimated_value?: number | null
+          id?: string
+          opportunity_type?: Database["public"]["Enums"]["opportunity_type"]
+          priority?: Database["public"]["Enums"]["opportunity_priority"]
+          problem?: string | null
+          proposed_solution?: string | null
+          source?: string
+          status?: Database["public"]["Enums"]["opportunity_status"]
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "opportunities_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "opportunities_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -227,7 +586,39 @@ export type Database = {
         | "CONTENT"
         | "PARTNERSHIP"
         | "REFERRAL"
+      contact_verification_status: "VERIFIED" | "UNVERIFIED" | "UNKNOWN"
+      lead_classification:
+        | "EXCEPTIONAL"
+        | "HIGH"
+        | "MEDIUM"
+        | "LOW"
+        | "VERY_LOW"
+      opportunity_priority: "HIGH" | "MEDIUM" | "LOW"
+      opportunity_status: "IDENTIFIED" | "PROPOSED" | "ACCEPTED" | "REJECTED"
+      opportunity_type:
+        | "WEBSITE_REDESIGN"
+        | "WEBSITE_DEVELOPMENT"
+        | "MOBILE_APP"
+        | "BOOKING_SYSTEM"
+        | "ECOMMERCE"
+        | "CUSTOMER_PORTAL"
+        | "UI_UX_REDESIGN"
+        | "AUTOMATION"
+        | "AI_INTEGRATION"
+        | "DASHBOARD"
+        | "CUSTOM_SOFTWARE"
+        | "OTHER"
+      pipeline_status:
+        | "NEW"
+        | "QUALIFIED"
+        | "CONTACTED"
+        | "REPLIED"
+        | "MEETING"
+        | "PROPOSAL"
+        | "WON"
+        | "LOST"
       product_type: "ZVIKO_LABS" | "DATING_APP"
+      whatsapp_status: "AVAILABLE" | "NOT_AVAILABLE" | "UNKNOWN"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -365,7 +756,36 @@ export const Constants = {
         "PARTNERSHIP",
         "REFERRAL",
       ],
+      contact_verification_status: ["VERIFIED", "UNVERIFIED", "UNKNOWN"],
+      lead_classification: ["EXCEPTIONAL", "HIGH", "MEDIUM", "LOW", "VERY_LOW"],
+      opportunity_priority: ["HIGH", "MEDIUM", "LOW"],
+      opportunity_status: ["IDENTIFIED", "PROPOSED", "ACCEPTED", "REJECTED"],
+      opportunity_type: [
+        "WEBSITE_REDESIGN",
+        "WEBSITE_DEVELOPMENT",
+        "MOBILE_APP",
+        "BOOKING_SYSTEM",
+        "ECOMMERCE",
+        "CUSTOMER_PORTAL",
+        "UI_UX_REDESIGN",
+        "AUTOMATION",
+        "AI_INTEGRATION",
+        "DASHBOARD",
+        "CUSTOM_SOFTWARE",
+        "OTHER",
+      ],
+      pipeline_status: [
+        "NEW",
+        "QUALIFIED",
+        "CONTACTED",
+        "REPLIED",
+        "MEETING",
+        "PROPOSAL",
+        "WON",
+        "LOST",
+      ],
       product_type: ["ZVIKO_LABS", "DATING_APP"],
+      whatsapp_status: ["AVAILABLE", "NOT_AVAILABLE", "UNKNOWN"],
     },
   },
 } as const

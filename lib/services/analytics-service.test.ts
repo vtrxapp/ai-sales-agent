@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { summarizeCampaigns } from "./analytics-service"
+import { summarizeCampaigns, summarizePipeline } from "./analytics-service"
 
 describe("summarizeCampaigns", () => {
   it("returns all zeros for no campaigns", () => {
@@ -40,5 +40,40 @@ describe("summarizeCampaigns", () => {
     )
 
     expect(result.activeCampaigns).toBe(0)
+  })
+})
+
+describe("summarizePipeline", () => {
+  it("counts businesses per pipeline status", () => {
+    const result = summarizePipeline([
+      { pipeline_status: "NEW", classification: null },
+      { pipeline_status: "NEW", classification: null },
+      { pipeline_status: "WON", classification: "HIGH" },
+    ])
+
+    expect(result.totalProspects).toBe(3)
+    expect(result.statusCounts.NEW).toBe(2)
+    expect(result.statusCounts.WON).toBe(1)
+    expect(result.statusCounts.LOST).toBe(0)
+  })
+
+  it("counts only businesses with a lead score as scored", () => {
+    const result = summarizePipeline([
+      { pipeline_status: "NEW", classification: "HIGH" },
+      { pipeline_status: "NEW", classification: null },
+    ])
+
+    expect(result.scoredCount).toBe(1)
+  })
+
+  it("flags high-value prospects still in NEW status as uncontacted", () => {
+    const result = summarizePipeline([
+      { pipeline_status: "NEW", classification: "EXCEPTIONAL" },
+      { pipeline_status: "NEW", classification: "HIGH" },
+      { pipeline_status: "NEW", classification: "MEDIUM" },
+      { pipeline_status: "CONTACTED", classification: "HIGH" },
+    ])
+
+    expect(result.highValueUncontactedCount).toBe(2)
   })
 })

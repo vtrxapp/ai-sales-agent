@@ -45,11 +45,10 @@ export function summarizeCampaigns(
   }
 }
 
-// Phase 1 only has products/campaigns/activities. Lead, pipeline, and
-// traffic/conversion KPIs from the full spec need tables that arrive in
-// later phases (businesses/opportunities in Phase 2-4, campaign_events/
-// signatures in Phase 6-7). Rather than fabricate zeros for those, callers
-// should render "not available yet" - see app/(dashboard)/overview/page.tsx.
+// Traffic/conversion KPIs from the full spec still need tables that arrive
+// in later phases (campaign_events/signatures in Phase 6-7). Rather than
+// fabricate zeros for those, callers should render "not available yet" -
+// see app/(dashboard)/overview/page.tsx.
 export async function getOverviewStats(
   supabase: SupabaseClient<Database>
 ): Promise<OverviewStats> {
@@ -63,4 +62,70 @@ export async function getOverviewStats(
   }
 
   return summarizeCampaigns(campaigns.data, totalProducts ?? 0)
+}
+
+export type PipelineStats = {
+  totalProspects: number
+  statusCounts: Record<Enums<"pipeline_status">, number>
+  scoredCount: number
+  highValueUncontactedCount: number
+}
+
+const EMPTY_PIPELINE_STATUS_COUNTS: Record<Enums<"pipeline_status">, number> = {
+  NEW: 0,
+  QUALIFIED: 0,
+  CONTACTED: 0,
+  REPLIED: 0,
+  MEETING: 0,
+  PROPOSAL: 0,
+  WON: 0,
+  LOST: 0,
+}
+
+export type PipelineStatsInput = {
+  pipeline_status: Enums<"pipeline_status">
+  classification: Enums<"lead_classification"> | null
+}[]
+
+// Pure aggregation - unit-testable without mocking Supabase.
+export function summarizePipeline(businesses: PipelineStatsInput): PipelineStats {
+  const statusCounts = { ...EMPTY_PIPELINE_STATUS_COUNTS }
+  let scoredCount = 0
+  let highValueUncontactedCount = 0
+
+  for (const business of businesses) {
+    statusCounts[business.pipeline_status] += 1
+    if (business.classification) {
+      scoredCount += 1
+      if (
+        (business.classification === "EXCEPTIONAL" || business.classification === "HIGH") &&
+        business.pipeline_status === "NEW"
+      ) {
+        highValueUncontactedCount += 1
+      }
+    }
+  }
+
+  return {
+    totalProspects: businesses.length,
+    statusCounts,
+    scoredCount,
+    highValueUncontactedCount,
+  }
+}
+
+export async function getPipelineStats(supabase: SupabaseClient<Database>): Promise<PipelineStats> {
+  const { data, error } = await supabase
+    .from("businesses")
+    .select("pipeline_status, lead_scores(classification)")
+    .returns<{ pipeline_status: Enums<"pipeline_status">; lead_scores: { classification: Enums<"lead_classification"> }[] | { classification: Enums<"lead_classification"> } | null }[]>()
+
+  if (error) throw new Error(`Failed to load pipeline stats: ${error.message}`)
+
+  return summarizePipeline(
+    data.map((row) => {
+      const leadScore = Array.isArray(row.lead_scores) ? (row.lead_scores[0] ?? null) : row.lead_scores
+      return { pipeline_status: row.pipeline_status, classification: leadScore?.classification ?? null }
+    })
+  )
 }

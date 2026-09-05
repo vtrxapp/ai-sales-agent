@@ -3,7 +3,7 @@ import { Sparkles } from "lucide-react"
 
 import { createClient } from "@/lib/supabase/server"
 import { listProducts } from "@/lib/services/product-service"
-import { getOverviewStats } from "@/lib/services/analytics-service"
+import { getOverviewStats, getPipelineStats } from "@/lib/services/analytics-service"
 import { listRecentActivities } from "@/lib/services/activity-service"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { ActivityFeed } from "@/components/dashboard/activity-feed"
@@ -12,9 +12,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 
 export default async function OverviewPage() {
   const supabase = await createClient()
-  const [products, stats, activities] = await Promise.all([
+  const [products, stats, pipelineStats, activities] = await Promise.all([
     listProducts(supabase),
     getOverviewStats(supabase),
+    getPipelineStats(supabase),
     listRecentActivities(supabase, 10),
   ])
 
@@ -31,6 +32,24 @@ export default async function OverviewPage() {
         <StatCard label="Products" value={stats.totalProducts} />
         <StatCard label="Total campaigns" value={stats.totalCampaigns} />
         <StatCard label="Active campaigns" value={stats.activeCampaigns} />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Zviko Labs pipeline</h2>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <StatCard label="Total prospects" value={pipelineStats.totalProspects} />
+          <StatCard label="Qualified" value={pipelineStats.statusCounts.QUALIFIED} />
+          <StatCard label="Meetings" value={pipelineStats.statusCounts.MEETING} />
+          <StatCard label="Won" value={pipelineStats.statusCounts.WON} />
+        </div>
+        {pipelineStats.highValueUncontactedCount > 0 && (
+          <p className="mt-3 text-sm">
+            <Link href="/prospects?status=NEW&sort=score_desc" className="text-primary hover:underline">
+              {pipelineStats.highValueUncontactedCount} high-scoring prospect
+              {pipelineStats.highValueUncontactedCount === 1 ? "" : "s"} haven&apos;t been contacted yet
+            </Link>
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -62,7 +81,7 @@ export default async function OverviewPage() {
           <EmptyState
             icon={Sparkles}
             title="Not available yet"
-            description="The AI Growth Advisor (Phase 8) generates recommendations from lead, campaign, and conversion data. There isn't enough of that yet - it arrives once lead scoring (Phase 2) and campaign analytics (Phase 7) are in place."
+            description="The AI Growth Advisor (Phase 8) synthesizes recommendations across leads, campaigns, and conversion data. It isn't built yet - the high-scoring-prospects nudge above is a real computed count, not an AI recommendation."
           />
         </CardContent>
       </Card>

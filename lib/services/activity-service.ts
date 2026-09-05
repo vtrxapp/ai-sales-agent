@@ -39,7 +39,7 @@ export async function logActivity(
 export async function listRecentActivities(
   supabase: SupabaseClient<Database>,
   limit = 10,
-  filters?: { campaignId?: string }
+  filters?: { campaignId?: string; entityType?: string; entityId?: string }
 ): Promise<Tables<"activities">[]> {
   let query = supabase
     .from("activities")
@@ -49,6 +49,12 @@ export async function listRecentActivities(
 
   if (filters?.campaignId) {
     query = query.eq("campaign_id", filters.campaignId)
+  }
+  if (filters?.entityType) {
+    query = query.eq("entity_type", filters.entityType)
+  }
+  if (filters?.entityId) {
+    query = query.eq("entity_id", filters.entityId)
   }
 
   const { data, error } = await query

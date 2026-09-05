@@ -15,10 +15,12 @@ Full background, architecture decisions, and the phase-by-phase build plan
 are in [`PROJECT_AUDIT.md`](./PROJECT_AUDIT.md). This README is the
 practical "how do I run/deploy/test this" guide.
 
-**Current status: Phase 1 (Foundation).** Auth, the app shell, products,
-and campaigns are functional. Leads, audits, outreach, audiences,
-signatures, analytics, and the AI assistant are real pages with honest
-"coming in Phase N" placeholders — see the sidebar.
+**Current status: Phase 2 (Zviko Labs Lead Engine).** Auth, the app shell,
+products, campaigns, lead discovery, the business/prospect database,
+lead scoring, and the sales pipeline are functional. Website audits
+(Phase 3), outreach, proposals, audiences, signatures, analytics, and
+the AI assistant are real pages with honest "coming in Phase N"
+placeholders — see the sidebar.
 
 ## Architecture at a glance
 
@@ -27,9 +29,10 @@ signatures, analytics, and the AI assistant are real pages with honest
   external UI library dependency — see "Why no shadcn CLI" below).
 - **Database/Auth**: Supabase (Postgres + Row Level Security + Supabase Auth).
 - **Hosting**: Vercel.
-- **AI**: not wired in yet (arrives with Phase 2+); the plan is a small
-  provider-agnostic interface so Anthropic can be swapped later without
-  rewriting call sites.
+- **AI**: Anthropic (Claude) behind a small provider-agnostic interface
+  (`lib/ai/`) — structured output via `messages.parse()` for research/
+  scoring, and Claude's hosted web search/fetch tools for lead discovery.
+  See "AI setup" below.
 
 This is an **internal tool with no public signup**. Team members are added
 directly in the Supabase Dashboard (see below), not through the app.
@@ -47,20 +50,29 @@ can be extended the same way — just without the CLI as a dependency.
 ```
 app/
   (dashboard)/        Authenticated routes: overview, products, campaigns,
-                       and the Phase 2+ stub pages (leads, prospects, ...)
+                       leads, prospects, pipeline, and the Phase 3+ stub
+                       pages (audiences, outreach, proposals, ...)
   login/               Sign-in page (password + magic link)
   auth/callback/       Supabase magic-link callback
-  actions/             Server Actions (auth, campaigns)
+  actions/             Server Actions (auth, campaigns, leads, businesses)
 components/
   ui/                  Hand-built shadcn-style primitives
   shell/               Sidebar + topbar (app shell)
   dashboard/           EmptyState, StatCard, ActivityFeed, PhaseStub
-  auth/, campaigns/    Feature-specific components
+  leads/, prospects/   Feature-specific components (discovery, bulk actions,
+                       research/score buttons, contact/opportunity forms)
 lib/
+  ai/                  AIProvider interface + Anthropic adapter (lib/ai/index.ts
+                       is the factory - throws a typed error if unconfigured)
   supabase/            Browser/server/admin Supabase clients + proxy session helper
-  services/            Business logic (ProductService, CampaignService, ...)
-                       — never call Supabase directly from a page/component
-  validations/         Zod schemas for form/API input
+  services/            Business logic (BusinessService, ContactService,
+                       LeadResearchService, LeadScoringService,
+                       DeduplicationService, ...) — never call Supabase
+                       directly from a page/component
+  services/discovery/  LeadDiscoveryProvider interface + the AI-web-search
+                       implementation (swap in a paid provider later without
+                       touching callers)
+  validations/         Zod schemas for form/API input and AI structured output
   types/database.types.ts   Generated from the live Supabase schema
   dal.ts               Data Access Layer: getCurrentUser/requireUser/getCurrentProfile
   nav.ts               Sidebar navigation config
@@ -69,6 +81,32 @@ proxy.ts               Next.js 16's replacement for middleware.ts — refreshes
                        requests to /login
 supabase/migrations/   SQL migrations, applied in order
 ```
+
+## AI setup
+
+Lead discovery, research, and scoring need `ANTHROPIC_API_KEY` (get one at
+[console.anthropic.com](https://console.anthropic.com/) → API Keys). Add it
+to `.env.local` and to your Vercel project's environment variables.
+
+Without it, the rest of the app works normally — those specific actions
+return a clear "AI is not configured" message instead of failing silently
+or faking a result.
+
+What it's used for:
+- **Find Leads** (`/leads`): searches the public web via Claude's hosted
+  web search/fetch tools for businesses matching your criteria. This is
+  *not* a paid business-data API (Apollo, Clearbit, Google Places, etc.) —
+  results depend on what's publicly discoverable, and are shown to you for
+  review before anything is saved.
+- **Research** (on a prospect's page): fetches and summarizes a business's
+  public web presence, split into observed facts, inferences, and
+  recommendations — never presented as verified fact when it isn't.
+- **Score** (on a prospect's page): produces an explainable 0-100 lead
+  score. The total is always recomputed server-side from the seven scored
+  components — the AI's own stated total (if any) is never trusted directly.
+
+The model defaults to `claude-opus-5`; override with `ANTHROPIC_MODEL` if
+you want a different cost/quality tradeoff.
 
 ## Setup
 
@@ -148,8 +186,19 @@ npm run test        # Vitest — service/validation unit tests
 npm run test:e2e     # Playwright — auth + navigation end-to-end tests
 ```
 
-Playwright needs a running dev server and a real (test) Supabase user;
-see `playwright.config.ts` and `tests/e2e/` for what's covered today.
+Playwright needs a running dev server; most tests need no credentials
+(unauthenticated redirects, login page rendering). One authenticated
+test (`tests/e2e/auth.authenticated.spec.ts`) is skipped unless you set
+`E2E_TEST_EMAIL`/`E2E_TEST_PASSWORD` for a real test account you create
+yourself (see "Create your first user" above) — see `playwright.config.ts`
+and `tests/e2e/` for what's covered today.
+
+The AI-calling code paths (discovery, research, scoring) are unit-tested
+at the validation/logic layer (Zod schemas, score classification,
+deduplication matching) with mocked inputs, since this environment has no
+`ANTHROPIC_API_KEY` configured to make a real call against. If you have a
+key, exercising `/leads` → Research → Score once by hand is worth doing
+after pulling this branch.
 
 ## Deployment (Vercel)
 
@@ -182,9 +231,24 @@ see `playwright.config.ts` and `tests/e2e/` for what's covered today.
   confirm the user was created via the Dashboard (not some other path) and
   that `public.profiles` has a matching row.
 
+## Known limitations (Phase 2)
+
+- Opportunities proposed by AI research aren't deduplicated against a
+  prior research run on the same business — re-researching can add
+  overlapping opportunity rows. Manual cleanup for now; proper dedup is a
+  Phase 3 concern alongside the fuller Opportunity Engine.
+- There's no delete UI for businesses/contacts/opportunities (same
+  precedent as campaigns in Phase 1) — correct mistakes by editing, or
+  move a business's status along instead of removing it.
+- Bulk research/score is capped at 10 businesses per action (AI calls are
+  slower and rate-limited; bulk status updates have no such cap).
+- The sales pipeline is a reliable column view with a status dropdown per
+  card, not drag-and-drop (the spec explicitly allows this as the
+  fallback).
+
 ## Roadmap
 
-See `PROJECT_AUDIT.md` for the full phase plan (Phase 2: Lead Engine,
-Phase 3: Website Audits, Phase 4: Sales Intelligence, Phase 5: Dating App
+See `PROJECT_AUDIT.md` for the full phase plan (Phase 3: Website Audits &
+Opportunity Engine, Phase 4: Sales Intelligence, Phase 5: Dating App
 Growth, Phase 6: Signatures, Phase 7: Marketing Intelligence, Phase 8: AI
 Growth Advisor, Phase 9: Automation, Phase 10: Production Hardening).
