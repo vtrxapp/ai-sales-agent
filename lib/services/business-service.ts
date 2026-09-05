@@ -4,6 +4,7 @@ import type { Database, Enums, Tables } from "@/lib/types/database.types"
 import { normalizeBusinessName, normalizePhone, normalizeWebsite } from "@/lib/services/normalize"
 import { findDuplicate, type DuplicateMatch } from "@/lib/services/deduplication-service"
 import { logActivity } from "@/lib/services/activity-service"
+import { listAuditHistory } from "@/lib/services/website-audit-service"
 
 export type CreateBusinessInput = {
   name: string
@@ -148,6 +149,11 @@ export type BusinessListFilters = {
   hasWhatsapp?: boolean
   hasEmail?: boolean
   hasOpportunities?: boolean
+  minWebsiteScore?: number
+  minOpportunityScore?: number
+  opportunityType?: Enums<"opportunity_type">
+  neverContacted?: boolean
+  recentlyAudited?: boolean
 }
 
 export type BusinessListSort =
@@ -156,10 +162,15 @@ export type BusinessListSort =
   | "researched_desc"
   | "opportunities_desc"
   | "status"
+  | "website_score_desc"
+  | "opportunity_score_desc"
 
 export type BusinessListItem = Tables<"businesses"> & {
   lead_score: Pick<Tables<"lead_scores">, "total_score" | "classification" | "confidence"> | null
   opportunity_count: number
+  opportunity_types: Enums<"opportunity_type">[]
+  top_opportunity_score: number | null
+  latest_audit: Pick<Tables<"website_audits">, "overall_score" | "audit_status" | "audited_at"> | null
 }
 
 type RawBusinessListRow = Tables<"businesses"> & {
@@ -167,8 +178,11 @@ type RawBusinessListRow = Tables<"businesses"> & {
     | Pick<Tables<"lead_scores">, "total_score" | "classification" | "confidence">
     | Pick<Tables<"lead_scores">, "total_score" | "classification" | "confidence">[]
     | null
-  opportunities: { count: number }[] | null
+  opportunities: Pick<Tables<"opportunities">, "score" | "opportunity_type">[] | null
+  website_audits: Pick<Tables<"website_audits">, "overall_score" | "audit_status" | "audited_at">[] | null
 }
+
+const RECENTLY_AUDITED_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 
 const STATUS_ORDER: Record<Enums<"pipeline_status">, number> = {
   NEW: 0,
@@ -188,18 +202,28 @@ export async function listBusinesses(
 ): Promise<BusinessListItem[]> {
   const { data, error } = await supabase
     .from("businesses")
-    .select("*, lead_scores(total_score, classification, confidence), opportunities(count)")
+    .select(
+      "*, lead_scores(total_score, classification, confidence), opportunities(score, opportunity_type), website_audits(overall_score, audit_status, audited_at)"
+    )
+    .order("audited_at", { referencedTable: "website_audits", ascending: false })
     .returns<RawBusinessListRow[]>()
 
   if (error) throw new Error(`Failed to load businesses: ${error.message}`)
 
   let items: BusinessListItem[] = data.map((row) => {
-    const { lead_scores, opportunities, ...business } = row
+    const { lead_scores, opportunities, website_audits, ...business } = row
     const leadScore = Array.isArray(lead_scores) ? (lead_scores[0] ?? null) : lead_scores
+    const opps = opportunities ?? []
+    const opportunityScores = opps
+      .map((o) => o.score)
+      .filter((score): score is number => score !== null)
     return {
       ...business,
       lead_score: leadScore,
-      opportunity_count: opportunities?.[0]?.count ?? 0,
+      opportunity_count: opps.length,
+      opportunity_types: opps.map((o) => o.opportunity_type),
+      top_opportunity_score: opportunityScores.length > 0 ? Math.max(...opportunityScores) : null,
+      latest_audit: website_audits?.[0] ?? null,
     }
   })
 
@@ -240,6 +264,24 @@ export async function listBusinesses(
   if (filters.hasOpportunities) {
     items = items.filter((b) => b.opportunity_count > 0)
   }
+  if (filters.minWebsiteScore !== undefined) {
+    items = items.filter((b) => (b.latest_audit?.overall_score ?? -1) >= filters.minWebsiteScore!)
+  }
+  if (filters.minOpportunityScore !== undefined) {
+    items = items.filter((b) => (b.top_opportunity_score ?? -1) >= filters.minOpportunityScore!)
+  }
+  if (filters.opportunityType) {
+    items = items.filter((b) => b.opportunity_types.includes(filters.opportunityType!))
+  }
+  if (filters.neverContacted) {
+    items = items.filter((b) => b.pipeline_status === "NEW")
+  }
+  if (filters.recentlyAudited) {
+    items = items.filter((b) => {
+      const auditedAt = b.latest_audit?.audited_at
+      return !!auditedAt && Date.now() - new Date(auditedAt).getTime() <= RECENTLY_AUDITED_WINDOW_MS
+    })
+  }
 
   switch (sort) {
     case "score_desc":
@@ -254,6 +296,12 @@ export async function listBusinesses(
       break
     case "opportunities_desc":
       items.sort((a, b) => b.opportunity_count - a.opportunity_count)
+      break
+    case "website_score_desc":
+      items.sort((a, b) => (b.latest_audit?.overall_score ?? -1) - (a.latest_audit?.overall_score ?? -1))
+      break
+    case "opportunity_score_desc":
+      items.sort((a, b) => (b.top_opportunity_score ?? -1) - (a.top_opportunity_score ?? -1))
       break
     case "status":
       items.sort((a, b) => STATUS_ORDER[a.pipeline_status] - STATUS_ORDER[b.pipeline_status])
@@ -274,6 +322,7 @@ export type BusinessDetail = Tables<"businesses"> & {
   research_notes: Tables<"business_research_notes">[]
   opportunities: Tables<"opportunities">[]
   contacts: Tables<"contacts">[]
+  audits: Tables<"website_audits">[]
 }
 
 export async function getBusinessById(
@@ -288,7 +337,7 @@ export async function getBusinessById(
   if (error) throw new Error(`Failed to load business: ${error.message}`)
   if (!business) return null
 
-  const [leadScore, researchNotes, opportunities, contacts] = await Promise.all([
+  const [leadScore, researchNotes, opportunities, contacts, audits] = await Promise.all([
     supabase.from("lead_scores").select("*").eq("business_id", id).maybeSingle(),
     supabase
       .from("business_research_notes")
@@ -297,6 +346,7 @@ export async function getBusinessById(
       .order("researched_at", { ascending: false }),
     supabase.from("opportunities").select("*").eq("business_id", id).order("created_at", { ascending: false }),
     supabase.from("contacts").select("*").eq("business_id", id).order("created_at", { ascending: false }),
+    listAuditHistory(supabase, id),
   ])
 
   if (leadScore.error) throw new Error(`Failed to load lead score: ${leadScore.error.message}`)
@@ -310,6 +360,7 @@ export async function getBusinessById(
     research_notes: researchNotes.data,
     opportunities: opportunities.data,
     contacts: contacts.data,
+    audits,
   }
 }
 

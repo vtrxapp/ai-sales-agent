@@ -4,6 +4,7 @@ import type { Database, Tables } from "@/lib/types/database.types"
 import type { AIProvider } from "@/lib/ai/types"
 import { BusinessResearchOutputSchema } from "@/lib/validations/ai-business-research"
 import { logActivity } from "@/lib/services/activity-service"
+import { findMatchingOpportunity, normalizeOpportunityTitle } from "@/lib/services/opportunity-service"
 
 const RESEARCH_SYSTEM_PROMPT = `You are the Lead Research service for Zviko Labs, a digital product studio based in Harare, Zimbabwe.
 
@@ -74,15 +75,54 @@ export async function researchBusiness(
     .eq("id", businessId)
   if (updateError) throw new Error(`Failed to update business: ${updateError.message}`)
 
-  // Foundation only (Phase 3 expands the Opportunity Engine) - no dedup
-  // against opportunities proposed by a prior research run yet; a known
-  // limitation, not silently swept under the rug (see Phase 2 report).
-  if (structured.proposed_opportunities.length > 0) {
-    const { error: oppError } = await supabase.from("opportunities").insert(
-      structured.proposed_opportunities.map((opportunity) => ({
+  // Dedup against opportunities already on file - matches on (business_id,
+  // opportunity_type, normalized title) only, update in place and bump
+  // times_detected on a match, insert fresh otherwise, never delete
+  // history. Closes the Phase 2 gap where a repeated research run
+  // inserted a fresh duplicate opportunity every time (see Phase 2
+  // report's known limitations).
+  let newOpportunities = 0
+  let reDetectedOpportunities = 0
+  for (const opportunity of structured.proposed_opportunities) {
+    const existing = await findMatchingOpportunity(
+      supabase,
+      businessId,
+      opportunity.opportunity_type,
+      opportunity.title
+    )
+    if (existing) {
+      const timesDetected = existing.times_detected + 1
+      const { error: updateOppError } = await supabase
+        .from("opportunities")
+        .update({
+          title: opportunity.title,
+          title_normalized: normalizeOpportunityTitle(opportunity.title),
+          description: opportunity.description,
+          problem: opportunity.problem,
+          proposed_solution: opportunity.proposed_solution,
+          confidence: opportunity.confidence,
+          last_detected_at: new Date().toISOString(),
+          times_detected: timesDetected,
+        })
+        .eq("id", existing.id)
+      if (updateOppError) throw new Error(`Failed to update opportunity: ${updateOppError.message}`)
+      reDetectedOpportunities++
+
+      await logActivity(supabase, {
+        entityType: "business",
+        entityId: businessId,
+        activityType: "OPPORTUNITY_RE_DETECTED",
+        description: `Opportunity "${opportunity.title}" was detected again for "${business.name}" (now seen ${timesDetected} times).`,
+        productId: null,
+        actorId,
+        metadata: { opportunity_id: existing.id, times_detected: timesDetected },
+      })
+    } else {
+      const { error: insertOppError } = await supabase.from("opportunities").insert({
         business_id: businessId,
         opportunity_type: opportunity.opportunity_type,
         title: opportunity.title,
+        title_normalized: normalizeOpportunityTitle(opportunity.title),
         description: opportunity.description,
         problem: opportunity.problem,
         proposed_solution: opportunity.proposed_solution,
@@ -90,19 +130,24 @@ export async function researchBusiness(
         confidence: opportunity.confidence,
         source: "ai_research",
         created_by: actorId,
-      }))
-    )
-    if (oppError) throw new Error(`Failed to save proposed opportunities: ${oppError.message}`)
+      })
+      if (insertOppError) throw new Error(`Failed to save proposed opportunity: ${insertOppError.message}`)
+      newOpportunities++
+    }
   }
 
   await logActivity(supabase, {
     entityType: "business",
     entityId: businessId,
     activityType: "BUSINESS_RESEARCHED",
-    description: `"${business.name}" was researched (${structured.observations.length} observations, ${structured.proposed_opportunities.length} opportunities identified).`,
+    description: `"${business.name}" was researched (${structured.observations.length} observations, ${newOpportunities} new opportunities, ${reDetectedOpportunities} re-detected).`,
     productId: null,
     actorId,
-    metadata: { source_urls: research.sourceUrls },
+    metadata: {
+      source_urls: research.sourceUrls,
+      new_opportunities: newOpportunities,
+      re_detected_opportunities: reDetectedOpportunities,
+    },
   })
 
   return noteRow

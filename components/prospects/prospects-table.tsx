@@ -125,8 +125,9 @@ export function ProspectsTable({ businesses }: { businesses: BusinessListItem[] 
             <TableHead>Business</TableHead>
             <TableHead>Industry</TableHead>
             <TableHead>Location</TableHead>
-            <TableHead>Score</TableHead>
+            <TableHead>Lead score</TableHead>
             <TableHead>Priority</TableHead>
+            <TableHead>Website</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Contact</TableHead>
             <TableHead>Opportunities</TableHead>
@@ -167,6 +168,15 @@ export function ProspectsTable({ businesses }: { businesses: BusinessListItem[] 
                 )}
               </TableCell>
               <TableCell>
+                {business.latest_audit?.overall_score !== null && business.latest_audit?.overall_score !== undefined ? (
+                  `${business.latest_audit.overall_score}/100`
+                ) : business.latest_audit ? (
+                  <span className="text-muted-foreground">{business.latest_audit.audit_status}</span>
+                ) : (
+                  <span className="text-muted-foreground">Not audited</span>
+                )}
+              </TableCell>
+              <TableCell>
                 <Badge variant="outline">{business.pipeline_status}</Badge>
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">
@@ -178,7 +188,16 @@ export function ProspectsTable({ businesses }: { businesses: BusinessListItem[] 
                   {!business.website && !business.phone && !business.email && "None found"}
                 </div>
               </TableCell>
-              <TableCell>{business.opportunity_count}</TableCell>
+              <TableCell>
+                {business.opportunity_count > 0 ? (
+                  <span>
+                    {business.opportunity_count}
+                    {business.top_opportunity_score !== null ? ` (top ${business.top_opportunity_score}/100)` : ""}
+                  </span>
+                ) : (
+                  0
+                )}
+              </TableCell>
               <TableCell className="text-muted-foreground">
                 {business.last_researched_at
                   ? new Date(business.last_researched_at).toLocaleDateString()

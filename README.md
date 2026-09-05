@@ -15,10 +15,11 @@ Full background, architecture decisions, and the phase-by-phase build plan
 are in [`PROJECT_AUDIT.md`](./PROJECT_AUDIT.md). This README is the
 practical "how do I run/deploy/test this" guide.
 
-**Current status: Phase 2 (Zviko Labs Lead Engine).** Auth, the app shell,
-products, campaigns, lead discovery, the business/prospect database,
-lead scoring, and the sales pipeline are functional. Website audits
-(Phase 3), outreach, proposals, audiences, signatures, analytics, and
+**Current status: Phase 3 (Website Audit & Opportunity Engine).** Auth, the
+app shell, products, campaigns, lead discovery, the business/prospect
+database, lead scoring, website audits, the full opportunity engine
+(deduplicated, scored, explainable), and the sales pipeline are
+functional. Outreach, proposals, audiences, signatures, analytics, and
 the AI assistant are real pages with honest "coming in Phase N"
 placeholders — see the sidebar.
 
@@ -67,6 +68,9 @@ lib/
   supabase/            Browser/server/admin Supabase clients + proxy session helper
   services/            Business logic (BusinessService, ContactService,
                        LeadResearchService, LeadScoringService,
+                       WebsiteAuditService, OpportunityAnalysisService,
+                       OpportunityService (dedup + scoring),
+                       NextActionService (pure decision tree),
                        DeduplicationService, ...) — never call Supabase
                        directly from a page/component
   services/discovery/  LeadDiscoveryProvider interface + the AI-web-search
@@ -104,6 +108,28 @@ What it's used for:
 - **Score** (on a prospect's page): produces an explainable 0-100 lead
   score. The total is always recomputed server-side from the seven scored
   components — the AI's own stated total (if any) is never trusted directly.
+- **Audit Website** (on a prospect's page): one button that chains three
+  steps — (1) validates the business's website URL and records `NO_WEBSITE`/
+  `INVALID_URL` without calling the AI if there's nothing to audit; (2)
+  researches the live site via Claude's hosted web tools and extracts 8
+  category scores (Technical/Mobile/UX/Accessibility/SEO/Content/Conversion/
+  Functionality), each backed by observed/inferred findings with evidence;
+  the server always computes `overall_score` from documented, changeable
+  weights (`AUDIT_CATEGORY_WEIGHTS` in `lib/services/website-audit-service.ts`)
+  — never an AI-stated total; (3) always re-analyzes opportunities from the
+  audit plus prior research (no fresh web call), producing an explainable
+  0-100 opportunity score from 6 components. Opportunities are deduplicated
+  by (business, type, normalized title): a repeat detection updates the
+  existing row and bumps `times_detected` rather than creating a duplicate.
+  Website content fetched during research is treated as untrusted data —
+  the prompts explicitly instruct the model to ignore any instruction-like
+  text found on a page and never let it override these system prompts.
+
+None of this ever sends anything — no WhatsApp, email, or SMS, and no
+automatic contact of any business. The prospect page's "Next recommended
+action" is a deterministic recommendation (a pure decision tree in
+`lib/services/next-action-service.ts`, not an AI call) for a human to act
+on manually.
 
 The model defaults to `claude-opus-5`; override with `ANTHROPIC_MODEL` if
 you want a different cost/quality tradeoff.
@@ -193,12 +219,16 @@ test (`tests/e2e/auth.authenticated.spec.ts`) is skipped unless you set
 yourself (see "Create your first user" above) — see `playwright.config.ts`
 and `tests/e2e/` for what's covered today.
 
-The AI-calling code paths (discovery, research, scoring) are unit-tested
-at the validation/logic layer (Zod schemas, score classification,
-deduplication matching) with mocked inputs, since this environment has no
-`ANTHROPIC_API_KEY` configured to make a real call against. If you have a
-key, exercising `/leads` → Research → Score once by hand is worth doing
-after pulling this branch.
+The AI-calling code paths (discovery, research, scoring, website audits,
+opportunity analysis) are unit-tested at the validation/logic layer (Zod
+schemas, score/priority classification, dedup matching, the audit-weighting
+math, the next-action decision tree) with mocked inputs and a fake Supabase
+client, since this environment has no `ANTHROPIC_API_KEY` configured to
+make a real call against. If you have a key, exercising `/leads` → Research
+→ Score → Audit Website once by hand is worth doing after pulling this
+branch — in particular, re-running Research or Audit Website on the same
+business a second time to confirm opportunities update in place
+(`times_detected` increments) instead of duplicating.
 
 ## Deployment (Vercel)
 
@@ -231,24 +261,43 @@ after pulling this branch.
   confirm the user was created via the Dashboard (not some other path) and
   that `public.profiles` has a matching row.
 
-## Known limitations (Phase 2)
+## Known limitations (Phase 3)
 
-- Opportunities proposed by AI research aren't deduplicated against a
-  prior research run on the same business — re-researching can add
-  overlapping opportunity rows. Manual cleanup for now; proper dedup is a
-  Phase 3 concern alongside the fuller Opportunity Engine.
-- There's no delete UI for businesses/contacts/opportunities (same
-  precedent as campaigns in Phase 1) — correct mistakes by editing, or
-  move a business's status along instead of removing it.
+- **No bulk website audit.** A single audit chains up to 3 AI calls
+  (research + audit extraction + opportunity analysis); a bulk version
+  across 10 businesses could mean ~30 sequential AI calls in one request,
+  which risks exceeding a serverless function's time budget. Audits are
+  per-business only for now (see `ResearchScoreActions`); Research and
+  Score still have bulk actions from Phase 2.
+- **`maxDuration = 60` on the prospect detail page** may not be enough for
+  an audit of a slow site on some Vercel plans (audits chain 3 sequential
+  AI calls). Raise it in `app/(dashboard)/prospects/[id]/page.tsx` if your
+  plan supports a higher function duration and you see audits time out.
+- **No fuzzy opportunity matching, by design.** Dedup matches on exact
+  (business, opportunity type, normalized title) only — a differently
+  worded re-detection of the same underlying problem creates a second row
+  rather than risk silently merging two distinct problems. Same
+  philosophy as business dedup (`deduplication-service.ts`).
+- Website audits never bypass access restrictions (robots.txt, logins,
+  paywalls, CAPTCHAs) — a site protected this way is recorded as
+  `UNREACHABLE` with an explanation, not scored.
+- There's still no delete UI for businesses/contacts/opportunities/audits
+  (same precedent as campaigns in Phase 1) — audits are append-only by
+  design (full history, never overwritten); correct other mistakes by
+  editing, or move a business's status along instead of removing it.
 - Bulk research/score is capped at 10 businesses per action (AI calls are
   slower and rate-limited; bulk status updates have no such cap).
 - The sales pipeline is a reliable column view with a status dropdown per
   card, not drag-and-drop (the spec explicitly allows this as the
   fallback).
+- As with Phase 1/2, there's no automated authenticated end-to-end test
+  for the new website-audit/opportunity UI — see "Testing" above for what
+  is covered, and the Phase 3 report for why (no test credentials
+  available to this environment).
 
 ## Roadmap
 
-See `PROJECT_AUDIT.md` for the full phase plan (Phase 3: Website Audits &
-Opportunity Engine, Phase 4: Sales Intelligence, Phase 5: Dating App
-Growth, Phase 6: Signatures, Phase 7: Marketing Intelligence, Phase 8: AI
-Growth Advisor, Phase 9: Automation, Phase 10: Production Hardening).
+See `PROJECT_AUDIT.md` for the full phase plan (Phase 4: Sales
+Intelligence, Phase 5: Dating App Growth, Phase 6: Signatures, Phase 7:
+Marketing Intelligence, Phase 8: AI Growth Advisor, Phase 9: Automation,
+Phase 10: Production Hardening).

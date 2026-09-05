@@ -8,9 +8,11 @@ import { createClient } from "@/lib/supabase/server"
 import { getAIProvider, AIError } from "@/lib/ai"
 import { researchBusiness } from "@/lib/services/lead-research-service"
 import { scoreLead } from "@/lib/services/lead-scoring-service"
+import { auditWebsite } from "@/lib/services/website-audit-service"
+import { analyzeOpportunities } from "@/lib/services/opportunity-analysis-service"
 import { createBusiness, updateBusinessStatus } from "@/lib/services/business-service"
 import { createContact } from "@/lib/services/contact-service"
-import { createOpportunity } from "@/lib/services/opportunity-service"
+import { createOpportunity, updateOpportunityStatus } from "@/lib/services/opportunity-service"
 import {
   contactFormSchema,
   manualBusinessSchema,
@@ -25,6 +27,10 @@ const MAX_BULK_AI_OPS = 10
 
 function isPipelineStatus(value: string): value is Enums<"pipeline_status"> {
   return (Constants.public.Enums.pipeline_status as readonly string[]).includes(value)
+}
+
+function isOpportunityStatus(value: string): value is Enums<"opportunity_status"> {
+  return (Constants.public.Enums.opportunity_status as readonly string[]).includes(value)
 }
 
 export async function researchBusinessAction(
@@ -67,6 +73,37 @@ export async function scoreBusinessAction(
 
   revalidatePath(`/prospects/${businessId}`)
   return { success: "Scoring complete." }
+}
+
+// Chains WebsiteAuditService -> OpportunityAnalysisService in one action so
+// "Audit Website" is a single button: audit the site (or record why it
+// couldn't be), then always re-analyze opportunities using that audit plus
+// existing research, never a fresh web-tools call for the analysis step.
+export async function auditWebsiteAction(
+  _prevState: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const user = await requireUser()
+  const businessId = formData.get("business_id")
+  if (typeof businessId !== "string") return { error: "Missing business." }
+
+  try {
+    const ai = getAIProvider()
+    const supabase = await createClient()
+    const audit = await auditWebsite(supabase, ai, businessId, user.id)
+    const analysis = await analyzeOpportunities(supabase, ai, businessId, audit, user.id)
+
+    revalidatePath(`/prospects/${businessId}`)
+    const scoreNote = audit.overall_score !== null ? `, overall score ${audit.overall_score}/100` : ""
+    return {
+      success: `Audit complete (${audit.audit_status}${scoreNote}). ${analysis.newCount} new opportunit${
+        analysis.newCount === 1 ? "y" : "ies"
+      }, ${analysis.reDetectedCount} re-detected.`,
+    }
+  } catch (err) {
+    if (err instanceof AIError) return { error: err.message }
+    return { error: err instanceof Error ? err.message : "Website audit failed unexpectedly." }
+  }
 }
 
 export async function updateStatusAction(
@@ -276,6 +313,34 @@ export async function createOpportunityAction(
 
   revalidatePath(`/prospects/${parsed.data.business_id}`)
   return { success: "Opportunity added." }
+}
+
+export async function updateOpportunityStatusAction(
+  _prevState: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const user = await requireUser()
+  const opportunityId = formData.get("opportunity_id")
+  const businessId = formData.get("business_id")
+  const status = formData.get("status")
+  if (
+    typeof opportunityId !== "string" ||
+    typeof businessId !== "string" ||
+    typeof status !== "string" ||
+    !isOpportunityStatus(status)
+  ) {
+    return { error: "Invalid opportunity status change." }
+  }
+
+  try {
+    const supabase = await createClient()
+    await updateOpportunityStatus(supabase, opportunityId, status, user.id)
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Failed to update opportunity status." }
+  }
+
+  revalidatePath(`/prospects/${businessId}`)
+  return { success: "Opportunity status updated." }
 }
 
 export async function createManualBusinessAction(

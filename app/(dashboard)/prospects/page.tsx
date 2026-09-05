@@ -22,6 +22,11 @@ type SearchParams = {
   has_whatsapp?: string
   has_email?: string
   has_opportunities?: string
+  min_website_score?: string
+  min_opportunity_score?: string
+  opportunity_type?: string
+  never_contacted?: string
+  recently_audited?: string
   sort?: string
   saved?: string
   duplicates?: string
@@ -44,6 +49,11 @@ export default async function ProspectsPage({
   )
     ? (params.classification as Enums<"lead_classification">)
     : undefined
+  const opportunityType = Constants.public.Enums.opportunity_type.includes(
+    params.opportunity_type as Enums<"opportunity_type">
+  )
+    ? (params.opportunity_type as Enums<"opportunity_type">)
+    : undefined
   const businesses = await listBusinesses(
     supabase,
     {
@@ -57,6 +67,11 @@ export default async function ProspectsPage({
       hasWhatsapp: params.has_whatsapp === "on",
       hasEmail: params.has_email === "on",
       hasOpportunities: params.has_opportunities === "on",
+      minWebsiteScore: params.min_website_score ? Number(params.min_website_score) : undefined,
+      minOpportunityScore: params.min_opportunity_score ? Number(params.min_opportunity_score) : undefined,
+      opportunityType,
+      neverContacted: params.never_contacted === "on",
+      recentlyAudited: params.recently_audited === "on",
     },
     sort
   )
@@ -115,13 +130,39 @@ export default async function ProspectsPage({
                 type="number"
                 min={0}
                 max={100}
-                placeholder="Min score"
+                placeholder="Min lead score"
                 defaultValue={params.min_score}
               />
+              <Input
+                name="min_website_score"
+                type="number"
+                min={0}
+                max={100}
+                placeholder="Min website score"
+                defaultValue={params.min_website_score}
+              />
+              <Input
+                name="min_opportunity_score"
+                type="number"
+                min={0}
+                max={100}
+                placeholder="Min opportunity score"
+                defaultValue={params.min_opportunity_score}
+              />
+              <Select name="opportunity_type" defaultValue={params.opportunity_type ?? ""}>
+                <option value="">Any opportunity type</option>
+                {Constants.public.Enums.opportunity_type.map((type) => (
+                  <option key={type} value={type}>
+                    {type.replace(/_/g, " ")}
+                  </option>
+                ))}
+              </Select>
               <Select name="sort" defaultValue={sort}>
                 <option value="discovered_desc">Recently discovered</option>
                 <option value="researched_desc">Recently researched</option>
-                <option value="score_desc">Highest score</option>
+                <option value="score_desc">Highest lead score</option>
+                <option value="website_score_desc">Highest website score</option>
+                <option value="opportunity_score_desc">Highest opportunity score</option>
                 <option value="opportunities_desc">Most opportunities</option>
                 <option value="status">Status</option>
               </Select>
@@ -151,6 +192,24 @@ export default async function ProspectsPage({
                   className="size-4"
                 />
                 Has opportunities
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  name="never_contacted"
+                  defaultChecked={params.never_contacted === "on"}
+                  className="size-4"
+                />
+                Never contacted
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  name="recently_audited"
+                  defaultChecked={params.recently_audited === "on"}
+                  className="size-4"
+                />
+                Recently audited (30d)
               </label>
             </div>
             <div className="flex gap-2">

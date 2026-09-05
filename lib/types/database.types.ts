@@ -439,57 +439,118 @@ export type Database = {
       }
       opportunities: {
         Row: {
+          audit_id: string | null
           business_id: string
+          business_impact_score: number | null
+          commercial_fit_score: number | null
           confidence: number | null
           created_at: string
           created_by: string | null
+          customer_need_score: number | null
           description: string | null
+          estimated_complexity:
+            | Database["public"]["Enums"]["opportunity_complexity"]
+            | null
           estimated_value: number | null
+          evidence: string | null
+          evidence_strength_score: number | null
+          expected_benefit: string | null
+          feasibility_score: number | null
           id: string
+          last_detected_at: string
           opportunity_type: Database["public"]["Enums"]["opportunity_type"]
           priority: Database["public"]["Enums"]["opportunity_priority"]
           problem: string | null
           proposed_solution: string | null
+          recommended_service: string | null
+          score: number | null
+          score_reasoning: Json
           source: string
           status: Database["public"]["Enums"]["opportunity_status"]
+          times_detected: number
           title: string
+          title_normalized: string
           updated_at: string
+          urgency_score: number | null
         }
         Insert: {
+          audit_id?: string | null
           business_id: string
+          business_impact_score?: number | null
+          commercial_fit_score?: number | null
           confidence?: number | null
           created_at?: string
           created_by?: string | null
+          customer_need_score?: number | null
           description?: string | null
+          estimated_complexity?:
+            | Database["public"]["Enums"]["opportunity_complexity"]
+            | null
           estimated_value?: number | null
+          evidence?: string | null
+          evidence_strength_score?: number | null
+          expected_benefit?: string | null
+          feasibility_score?: number | null
           id?: string
+          last_detected_at?: string
           opportunity_type: Database["public"]["Enums"]["opportunity_type"]
           priority?: Database["public"]["Enums"]["opportunity_priority"]
           problem?: string | null
           proposed_solution?: string | null
+          recommended_service?: string | null
+          score?: number | null
+          score_reasoning?: Json
           source?: string
           status?: Database["public"]["Enums"]["opportunity_status"]
+          times_detected?: number
           title: string
+          title_normalized: string
           updated_at?: string
+          urgency_score?: number | null
         }
         Update: {
+          audit_id?: string | null
           business_id?: string
+          business_impact_score?: number | null
+          commercial_fit_score?: number | null
           confidence?: number | null
           created_at?: string
           created_by?: string | null
+          customer_need_score?: number | null
           description?: string | null
+          estimated_complexity?:
+            | Database["public"]["Enums"]["opportunity_complexity"]
+            | null
           estimated_value?: number | null
+          evidence?: string | null
+          evidence_strength_score?: number | null
+          expected_benefit?: string | null
+          feasibility_score?: number | null
           id?: string
+          last_detected_at?: string
           opportunity_type?: Database["public"]["Enums"]["opportunity_type"]
           priority?: Database["public"]["Enums"]["opportunity_priority"]
           problem?: string | null
           proposed_solution?: string | null
+          recommended_service?: string | null
+          score?: number | null
+          score_reasoning?: Json
           source?: string
           status?: Database["public"]["Enums"]["opportunity_status"]
+          times_detected?: number
           title?: string
+          title_normalized?: string
           updated_at?: string
+          urgency_score?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "opportunities_audit_id_fkey"
+            columns: ["audit_id"]
+            isOneToOne: false
+            referencedRelation: "website_audits"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "opportunities_business_id_fkey"
             columns: ["business_id"]
@@ -569,6 +630,105 @@ export type Database = {
         }
         Relationships: []
       }
+      website_audits: {
+        Row: {
+          access_notes: string | null
+          accessibility_score: number | null
+          audit_status: Database["public"]["Enums"]["audit_status"]
+          audited_at: string
+          audited_by: string | null
+          business_id: string
+          confidence: number | null
+          content_score: number | null
+          conversion_score: number | null
+          created_at: string
+          functionality_score: number | null
+          id: string
+          inferred_issues: Json
+          mobile_score: number | null
+          model: string
+          observed_issues: Json
+          overall_score: number | null
+          recommendations: Json
+          seo_score: number | null
+          source_urls: Json
+          strengths: Json
+          technical_score: number | null
+          updated_at: string
+          ux_score: number | null
+          website_url: string | null
+        }
+        Insert: {
+          access_notes?: string | null
+          accessibility_score?: number | null
+          audit_status: Database["public"]["Enums"]["audit_status"]
+          audited_at?: string
+          audited_by?: string | null
+          business_id: string
+          confidence?: number | null
+          content_score?: number | null
+          conversion_score?: number | null
+          created_at?: string
+          functionality_score?: number | null
+          id?: string
+          inferred_issues?: Json
+          mobile_score?: number | null
+          model: string
+          observed_issues?: Json
+          overall_score?: number | null
+          recommendations?: Json
+          seo_score?: number | null
+          source_urls?: Json
+          strengths?: Json
+          technical_score?: number | null
+          updated_at?: string
+          ux_score?: number | null
+          website_url?: string | null
+        }
+        Update: {
+          access_notes?: string | null
+          accessibility_score?: number | null
+          audit_status?: Database["public"]["Enums"]["audit_status"]
+          audited_at?: string
+          audited_by?: string | null
+          business_id?: string
+          confidence?: number | null
+          content_score?: number | null
+          conversion_score?: number | null
+          created_at?: string
+          functionality_score?: number | null
+          id?: string
+          inferred_issues?: Json
+          mobile_score?: number | null
+          model?: string
+          observed_issues?: Json
+          overall_score?: number | null
+          recommendations?: Json
+          seo_score?: number | null
+          source_urls?: Json
+          strengths?: Json
+          technical_score?: number | null
+          updated_at?: string
+          ux_score?: number | null
+          website_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "website_audits_audited_by_fkey"
+            columns: ["audited_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "website_audits_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -577,6 +737,21 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
+      audit_category:
+        | "TECHNICAL"
+        | "MOBILE"
+        | "UX"
+        | "ACCESSIBILITY"
+        | "SEO"
+        | "CONTENT"
+        | "CONVERSION"
+        | "FUNCTIONALITY"
+      audit_status:
+        | "COMPLETED"
+        | "NO_WEBSITE"
+        | "UNREACHABLE"
+        | "INVALID_URL"
+        | "FAILED"
       campaign_status: "DRAFT" | "ACTIVE" | "PAUSED" | "COMPLETED" | "ARCHIVED"
       campaign_type:
         | "CLIENT_ACQUISITION"
@@ -593,8 +768,15 @@ export type Database = {
         | "MEDIUM"
         | "LOW"
         | "VERY_LOW"
-      opportunity_priority: "HIGH" | "MEDIUM" | "LOW"
-      opportunity_status: "IDENTIFIED" | "PROPOSED" | "ACCEPTED" | "REJECTED"
+      opportunity_complexity: "LOW" | "MEDIUM" | "HIGH"
+      opportunity_priority: "HIGH" | "MEDIUM" | "LOW" | "CRITICAL"
+      opportunity_status:
+        | "IDENTIFIED"
+        | "QUALIFIED"
+        | "PRESENTED"
+        | "ACCEPTED"
+        | "REJECTED"
+        | "CLOSED"
       opportunity_type:
         | "WEBSITE_REDESIGN"
         | "WEBSITE_DEVELOPMENT"
@@ -746,6 +928,23 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      audit_category: [
+        "TECHNICAL",
+        "MOBILE",
+        "UX",
+        "ACCESSIBILITY",
+        "SEO",
+        "CONTENT",
+        "CONVERSION",
+        "FUNCTIONALITY",
+      ],
+      audit_status: [
+        "COMPLETED",
+        "NO_WEBSITE",
+        "UNREACHABLE",
+        "INVALID_URL",
+        "FAILED",
+      ],
       campaign_status: ["DRAFT", "ACTIVE", "PAUSED", "COMPLETED", "ARCHIVED"],
       campaign_type: [
         "CLIENT_ACQUISITION",
@@ -758,8 +957,16 @@ export const Constants = {
       ],
       contact_verification_status: ["VERIFIED", "UNVERIFIED", "UNKNOWN"],
       lead_classification: ["EXCEPTIONAL", "HIGH", "MEDIUM", "LOW", "VERY_LOW"],
-      opportunity_priority: ["HIGH", "MEDIUM", "LOW"],
-      opportunity_status: ["IDENTIFIED", "PROPOSED", "ACCEPTED", "REJECTED"],
+      opportunity_complexity: ["LOW", "MEDIUM", "HIGH"],
+      opportunity_priority: ["HIGH", "MEDIUM", "LOW", "CRITICAL"],
+      opportunity_status: [
+        "IDENTIFIED",
+        "QUALIFIED",
+        "PRESENTED",
+        "ACCEPTED",
+        "REJECTED",
+        "CLOSED",
+      ],
       opportunity_type: [
         "WEBSITE_REDESIGN",
         "WEBSITE_DEVELOPMENT",

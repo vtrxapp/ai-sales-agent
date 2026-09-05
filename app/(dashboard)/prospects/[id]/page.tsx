@@ -4,14 +4,21 @@ import { notFound } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
 import { getBusinessById } from "@/lib/services/business-service"
 import { listRecentActivities } from "@/lib/services/activity-service"
+import { getNextAction, type NextAction } from "@/lib/services/next-action-service"
+import type { Enums } from "@/lib/types/database.types"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { ActivityFeed } from "@/components/dashboard/activity-feed"
 import { ResearchScoreActions } from "@/components/prospects/research-score-actions"
 import { StatusControl } from "@/components/prospects/status-control"
+import { OpportunityStatusControl } from "@/components/prospects/opportunity-status-control"
 import { AddContactForm } from "@/components/prospects/add-contact-form"
 import { AddOpportunityForm } from "@/components/prospects/add-opportunity-form"
 
+// Website audits chain up to 3 sequential AI calls (research + audit
+// extraction + opportunity analysis) - a slow site can approach this
+// budget. Raise this if the Vercel plan in use supports a higher function
+// duration; left at 60 here since that isn't known.
 export const maxDuration = 60
 
 type Observation = { fact: string; source_url?: string }
@@ -28,6 +35,11 @@ type DigitalPresence = {
   notes?: string
 }
 
+type AuditObservedIssue = { category: string; issue: string; evidence: string; source_url?: string }
+type AuditInferredIssue = { category: string; issue: string; basis: string }
+type AuditStrength = { category: string; strength: string; evidence: string }
+type AuditRecommendation = { category: string; recommendation: string; rationale: string }
+
 const SCORE_COMPONENTS = [
   { key: "industry_fit_score", max: 20, label: "Industry fit", reasoningKey: "industry_fit" },
   { key: "digital_problems_score", max: 20, label: "Digital problems", reasoningKey: "digital_problems" },
@@ -38,6 +50,26 @@ const SCORE_COMPONENTS = [
   { key: "other_score", max: 5, label: "Other", reasoningKey: "other" },
 ] as const
 
+const OPPORTUNITY_SCORE_COMPONENTS = [
+  { key: "business_impact_score", max: 25, label: "Business impact", reasoningKey: "business_impact" },
+  { key: "evidence_strength_score", max: 20, label: "Evidence strength", reasoningKey: "evidence_strength" },
+  { key: "customer_need_score", max: 15, label: "Customer need", reasoningKey: "customer_need" },
+  { key: "commercial_fit_score", max: 15, label: "Commercial fit", reasoningKey: "commercial_fit" },
+  { key: "urgency_score", max: 10, label: "Urgency", reasoningKey: "urgency" },
+  { key: "feasibility_score", max: 15, label: "Feasibility", reasoningKey: "feasibility" },
+] as const
+
+const AUDIT_CATEGORY_COMPONENTS = [
+  { key: "technical_score", label: "Technical" },
+  { key: "mobile_score", label: "Mobile" },
+  { key: "ux_score", label: "UX" },
+  { key: "accessibility_score", label: "Accessibility" },
+  { key: "seo_score", label: "SEO" },
+  { key: "content_score", label: "Content" },
+  { key: "conversion_score", label: "Conversion" },
+  { key: "functionality_score", label: "Functionality" },
+] as const
+
 const DIGITAL_PRESENCE_LABELS: Record<keyof Omit<DigitalPresence, "social_platforms" | "notes">, string> = {
   has_website: "Website",
   has_online_booking: "Online booking",
@@ -45,6 +77,19 @@ const DIGITAL_PRESENCE_LABELS: Record<keyof Omit<DigitalPresence, "social_platfo
   has_customer_portal: "Customer portal",
   has_mobile_app: "Mobile app",
   has_online_forms: "Online forms",
+}
+
+const NEXT_ACTION_LABELS: Record<NextAction, string> = {
+  RESEARCH_BUSINESS: "Run Research",
+  AUDIT_WEBSITE: "Audit Website",
+  SCORE_LEAD: "Run Score",
+  REVIEW_OPPORTUNITY: "Review opportunity",
+  ADD_CONTACT: "Add a contact",
+  PREPARE_OUTREACH: "Prepare outreach",
+  FOLLOW_UP: "Follow up",
+  SCHEDULE_MEETING: "Schedule a meeting",
+  SEND_PROPOSAL: "Send a proposal",
+  NO_ACTION: "No action needed",
 }
 
 export default async function ProspectDetailPage({
@@ -61,6 +106,18 @@ export default async function ProspectDetailPage({
 
   const latestResearch = business.research_notes[0] ?? null
   const digitalPresence = (latestResearch?.digital_presence ?? {}) as DigitalPresence
+
+  const latestAudit = business.audits[0] ?? null
+  const earlierAudits = business.audits.slice(1)
+
+  const activeOpportunities = business.opportunities.filter(
+    (o) => o.status !== "REJECTED" && o.status !== "CLOSED"
+  )
+  const topOpportunity =
+    [...activeOpportunities].sort((a, b) => (b.score ?? -1) - (a.score ?? -1))[0] ?? null
+  const sortedOpportunities = [...business.opportunities].sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
+
+  const nextAction = getNextAction(business)
 
   return (
     <div className="flex flex-col gap-6">
@@ -79,12 +136,61 @@ export default async function ProspectDetailPage({
                 {business.lead_score.total_score}/100 - {business.lead_score.classification}
               </Badge>
             )}
+            {latestAudit?.overall_score !== null && latestAudit?.overall_score !== undefined && (
+              <Badge variant="outline">Website {latestAudit.overall_score}/100</Badge>
+            )}
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
           <ResearchScoreActions businessId={business.id} />
           <StatusControl businessId={business.id} currentStatus={business.pipeline_status} />
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Why this business?</CardTitle>
+            <CardDescription>
+              The strongest reason to reach out, composed from what&apos;s already on file - not a fresh AI call.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {topOpportunity ? (
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-medium">{topOpportunity.title}</p>
+                  <Badge variant={priorityVariant(topOpportunity.priority)}>{topOpportunity.priority}</Badge>
+                  {topOpportunity.score !== null && <Badge variant="outline">{topOpportunity.score}/100</Badge>}
+                </div>
+                {topOpportunity.evidence && <Field label="Evidence (why contact)" value={topOpportunity.evidence} />}
+                {topOpportunity.recommended_service && (
+                  <Field label="Recommended service (what to offer)" value={topOpportunity.recommended_service} />
+                )}
+                {topOpportunity.expected_benefit && (
+                  <Field label="Expected benefit (why it's valuable)" value={topOpportunity.expected_benefit} />
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No active opportunities identified yet. Run Research and Audit Website above to find one.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Next recommended action</CardTitle>
+            <CardDescription>A deterministic recommendation, never an automatic send - review and act manually.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            <Badge variant="secondary" className="w-fit">
+              {NEXT_ACTION_LABELS[nextAction.action]}
+            </Badge>
+            <p className="text-sm text-muted-foreground">{nextAction.reason}</p>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -194,6 +300,96 @@ export default async function ProspectDetailPage({
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-base">Website audit</CardTitle>
+          <CardDescription>
+            {latestAudit
+              ? `Last audited ${new Date(latestAudit.audited_at).toLocaleString()} - ${latestAudit.audit_status}${
+                  business.audits.length > 1 ? ` (${business.audits.length} audits on file)` : ""
+                }`
+              : "Not audited yet."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {!latestAudit ? (
+            <p className="text-sm text-muted-foreground">Run Audit Website above to assess this business&apos;s site.</p>
+          ) : latestAudit.audit_status !== "COMPLETED" ? (
+            <p className="text-sm text-muted-foreground">
+              {latestAudit.access_notes ?? `Audit status: ${latestAudit.audit_status}`}
+            </p>
+          ) : (
+            <>
+              <div className="flex items-center gap-3">
+                <p className="text-2xl font-semibold">{latestAudit.overall_score}/100</p>
+                <p className="text-sm text-muted-foreground">overall score, weighted across 8 categories</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {AUDIT_CATEGORY_COMPONENTS.map((c) => (
+                  <div key={c.key} className="rounded-md border border-border p-2 text-center">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">{c.label}</p>
+                    <p className="text-lg font-medium">
+                      {(latestAudit as unknown as Record<string, number | null>)[c.key] ?? "-"}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                <AuditColumn
+                  title="Observed issues"
+                  items={(latestAudit.observed_issues as AuditObservedIssue[]).map((i) => ({
+                    category: i.category,
+                    text: i.issue,
+                  }))}
+                  badgeVariant="outline"
+                />
+                <AuditColumn
+                  title="Inferred issues"
+                  items={(latestAudit.inferred_issues as AuditInferredIssue[]).map((i) => ({
+                    category: i.category,
+                    text: `${i.issue} (${i.basis})`,
+                  }))}
+                  badgeVariant="secondary"
+                />
+                <AuditColumn
+                  title="Strengths"
+                  items={(latestAudit.strengths as AuditStrength[]).map((s) => ({
+                    category: s.category,
+                    text: s.strength,
+                  }))}
+                  badgeVariant="success"
+                />
+                <AuditColumn
+                  title="Recommendations"
+                  items={(latestAudit.recommendations as AuditRecommendation[]).map((r) => ({
+                    category: r.category,
+                    text: r.recommendation,
+                  }))}
+                  badgeVariant="outline"
+                />
+              </div>
+            </>
+          )}
+
+          {earlierAudits.length > 0 && (
+            <details className="rounded-md border border-border p-3">
+              <summary className="cursor-pointer text-sm font-medium">
+                Audit history ({earlierAudits.length} earlier audit{earlierAudits.length === 1 ? "" : "s"})
+              </summary>
+              <ul className="mt-3 flex flex-col divide-y divide-border text-sm">
+                {earlierAudits.map((a) => (
+                  <li key={a.id} className="flex items-center justify-between py-2">
+                    <span className="text-muted-foreground">{new Date(a.audited_at).toLocaleString()}</span>
+                    <span>{a.audit_status}</span>
+                    <span>{a.overall_score !== null ? `${a.overall_score}/100` : "-"}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="text-base">AI research summary</CardTitle>
           <CardDescription>
             {business.research_notes.length > 1
@@ -226,25 +422,69 @@ export default async function ProspectDetailPage({
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Potential opportunities</CardTitle>
+          <CardDescription>
+            Ranked by the explainable 0-100 score (business impact, evidence strength, customer need, commercial fit, urgency, feasibility).
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          {business.opportunities.length === 0 ? (
+          {sortedOpportunities.length === 0 ? (
             <p className="text-sm text-muted-foreground">No opportunities identified yet.</p>
           ) : (
             <ul className="flex flex-col divide-y divide-border">
-              {business.opportunities.map((opportunity) => (
-                <li key={opportunity.id} className="flex flex-col gap-1 py-3">
-                  <div className="flex items-center gap-2">
+              {sortedOpportunities.map((opportunity) => (
+                <li key={opportunity.id} className="flex flex-col gap-2 py-4">
+                  <div className="flex flex-wrap items-center gap-2">
                     <p className="font-medium">{opportunity.title}</p>
                     <Badge variant="outline">{opportunity.opportunity_type.replace(/_/g, " ")}</Badge>
-                    <Badge variant={opportunity.priority === "HIGH" ? "warning" : "secondary"}>
-                      {opportunity.priority}
-                    </Badge>
+                    <Badge variant={priorityVariant(opportunity.priority)}>{opportunity.priority}</Badge>
+                    {opportunity.score !== null && <Badge variant="secondary">{opportunity.score}/100</Badge>}
+                    {opportunity.estimated_complexity && (
+                      <Badge variant="outline">{opportunity.estimated_complexity} complexity</Badge>
+                    )}
+                    {opportunity.times_detected > 1 && (
+                      <Badge variant="outline">Detected {opportunity.times_detected}x</Badge>
+                    )}
                   </div>
+                  {opportunity.evidence && <Field label="Evidence" value={opportunity.evidence} />}
+                  {opportunity.recommended_service && (
+                    <Field label="Recommended service" value={opportunity.recommended_service} />
+                  )}
+                  {opportunity.expected_benefit && <Field label="Expected benefit" value={opportunity.expected_benefit} />}
                   {opportunity.problem && <p className="text-sm text-muted-foreground">Problem: {opportunity.problem}</p>}
                   {opportunity.proposed_solution && (
                     <p className="text-sm text-muted-foreground">Solution: {opportunity.proposed_solution}</p>
                   )}
+                  {opportunity.score !== null && (
+                    <details className="text-sm">
+                      <summary className="cursor-pointer text-muted-foreground">Score breakdown</summary>
+                      <div className="mt-2 flex flex-col gap-1">
+                        {OPPORTUNITY_SCORE_COMPONENTS.map((component) => {
+                          const value = (opportunity as unknown as Record<string, number | null>)[component.key]
+                          const reasoning = (opportunity.score_reasoning as Record<string, string> | null)?.[
+                            component.reasoningKey
+                          ]
+                          return (
+                            <div key={component.key} className="flex flex-col gap-0.5">
+                              <div className="flex items-center justify-between">
+                                <span>{component.label}</span>
+                                <span>
+                                  {value ?? "-"}/{component.max}
+                                </span>
+                              </div>
+                              {reasoning && <p className="text-xs text-muted-foreground">{reasoning}</p>}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </details>
+                  )}
+                  <div className="mt-1">
+                    <OpportunityStatusControl
+                      businessId={business.id}
+                      opportunityId={opportunity.id}
+                      currentStatus={opportunity.status}
+                    />
+                  </div>
                 </li>
               ))}
             </ul>
@@ -300,6 +540,19 @@ function whatsappLabel(status: string): string {
   return "Unknown"
 }
 
+function priorityVariant(priority: Enums<"opportunity_priority">): "destructive" | "warning" | "secondary" | "outline" {
+  switch (priority) {
+    case "CRITICAL":
+      return "destructive"
+    case "HIGH":
+      return "warning"
+    case "MEDIUM":
+      return "secondary"
+    default:
+      return "outline"
+  }
+}
+
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
@@ -320,6 +573,36 @@ function ResearchColumn({ title, items }: { title: string; items: string[] }) {
           {items.map((item, index) => (
             <li key={index} className="text-muted-foreground">
               {item}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function AuditColumn({
+  title,
+  items,
+  badgeVariant,
+}: {
+  title: string
+  items: { category: string; text: string }[]
+  badgeVariant: "outline" | "secondary" | "success"
+}) {
+  return (
+    <div>
+      <p className="mb-2 text-sm font-medium">{title}</p>
+      {items.length === 0 ? (
+        <p className="text-sm text-muted-foreground">None</p>
+      ) : (
+        <ul className="flex flex-col gap-2 text-sm">
+          {items.map((item, index) => (
+            <li key={index} className="text-muted-foreground">
+              <Badge variant={badgeVariant} className="mr-1">
+                {item.category}
+              </Badge>
+              {item.text}
             </li>
           ))}
         </ul>
