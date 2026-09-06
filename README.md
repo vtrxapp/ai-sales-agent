@@ -15,19 +15,23 @@ Full background, architecture decisions, and the phase-by-phase build plan
 are in [`PROJECT_AUDIT.md`](./PROJECT_AUDIT.md). This README is the
 practical "how do I run/deploy/test this" guide.
 
-**Current status: Phase 6 (Response Tracking & Sales Intelligence).**
-Auth, the app shell, products, campaigns, lead discovery, the
-business/prospect database, lead scoring, website audits, the full
+**Current status: Phase 6.1 (AI Draft Response & Human-Approved
+Follow-up).** Auth, the app shell, products, campaigns, lead discovery,
+the business/prospect database, lead scoring, website audits, the full
 opportunity engine, the sales pipeline, sales strategy generation,
-WhatsApp/email outreach drafting and sending, and now **inbound
-response tracking** — real WhatsApp and email replies arrive via
-official provider webhooks, get matched to the right business, are
-AI-classified for intent/sentiment/urgency, and surface as a
-recommended next action a human decides on at `/responses`. Proposals,
-audiences, signatures, and the AI assistant are real pages with honest
-"coming in Phase N" placeholders — see the sidebar. AI-generated
-replies are never sent automatically; automated follow-ups, negotiation,
-and mass sending remain explicitly out of scope.
+WhatsApp/email outreach drafting and sending, inbound response tracking
+(real WhatsApp/email replies arrive via official provider webhooks, get
+matched to the right business, and are AI-classified for intent/
+sentiment/urgency), and now **AI-drafted replies** — from a conversation
+at `/responses/[id]`, a human can click "Generate Response" to have the
+AI propose a reply grounded in that specific conversation, edit it, and
+send it through the exact same approve → Send workflow as any other
+message. Proposals, audiences, signatures, and the AI assistant are real
+pages with honest "coming in Phase N" placeholders — see the sidebar.
+**AI-generated replies are never sent automatically** — every send is
+still a separate, explicit, human-confirmed action; automated
+follow-ups, negotiation, and mass sending remain explicitly out of
+scope.
 
 ## Architecture at a glance
 
@@ -74,7 +78,9 @@ components/
                        research/score/audit buttons, contact/opportunity forms,
                        Generate Outreach action, outreach draft review card)
   responses/           Conversation actions, reclassify button, unmatched-
-                       message assignment form
+                       message assignment form, response composer (AI
+                       draft generation + reuses OutreachDraftCard for
+                       edit/approve/send)
 lib/
   ai/                  AIProvider interface + Anthropic adapter (lib/ai/index.ts
                        is the factory - throws a typed error if unconfigured)
@@ -112,7 +118,10 @@ lib/
                        response-action-service (pure recommended-action
                        mapping), response-processing-service (the
                        webhook-to-database pipeline + opt-out/CRM sync),
-                       response-dashboard-service (read models for
+                       response-draft-service (AI-drafted replies -
+                       reuses outreach_drafts, never a second messaging
+                       system; only ever runs on an explicit human
+                       click), response-dashboard-service (read models for
                        /responses and the prospect page), ...) — never
                        call Supabase directly from a page/component
   services/discovery/  LeadDiscoveryProvider interface + the AI-web-search
@@ -306,6 +315,52 @@ shapes in `lib/inbound/whatsapp-inbound-provider.ts` and
 just note that without a correctly signed request, both routes reject
 it with 401, by design.
 
+## AI response drafting
+
+Needs no setup beyond what's already above - it reuses `ANTHROPIC_API_KEY`
+(see "AI setup") for generation and the exact same `WHATSAPP_*`/`RESEND_*`
+credentials (see "Sending setup") for actually sending. No new environment
+variable exists for this feature.
+
+**How it works**: open a conversation at `/responses/[id]` that has at
+least one inbound message and click **Generate Response**. The server
+reloads the conversation, the latest inbound message and its
+classification, the conversation history, the business's active sales
+strategy and the opportunity behind it - never anything the browser
+sends beyond the conversation ID - and makes one AI call for up to 3
+reply variants (Recommended/Direct/Conversational), each with a short,
+human-readable "why this draft" rationale. Each variant is stored as an
+ordinary `outreach_drafts` row (`message_type: RESPONSE`) - the exact
+same table, validation, and status machine Phase 4/5 already built for
+cold outreach - so from that point on **editing, approving, and sending
+a response draft is the identical UI and the identical server actions**
+used everywhere else in the app (`OutreachDraftCard`,
+`editOutreachDraftAction`, `approveOutreachDraftAction`,
+`sendOutreachDraftAction`). Editing a draft clears its approval and
+re-validates it, exactly like a cold-outreach draft.
+
+**Regenerate** replaces the active round with a fresh AI call (old
+drafts are kept, never deleted); re-clicking **Generate Response**
+without Regenerate just reuses whatever draft already exists for that
+same conversation + inbound message + channel, at no extra AI cost.
+
+**Nothing here can send anything by itself.** Generation only ever runs
+from that one button click - never from the inbound webhook, never from
+classification. A generated draft still has to be approved and then
+explicitly sent through the same confirmation panel as any other
+message, and a business marked Do Not Contact (or a message classified
+`OPT_OUT`) blocks generation itself, server-side, before any AI call is
+made.
+
+**WhatsApp** responses go out through the exact same pre-approved
+message template as Phase 5's cold outreach - there is no separate
+free-form/session-message code path, by design (see "Known limitations
+(Phase 6.1)" for what this means in practice). **Email** responses reuse
+the original subject line as `Re: <original subject>` (recovered from
+the last email this app actually sent in that conversation, or failing
+that from the prospect's own inbound subject) rather than letting the AI
+invent a new one each time.
+
 ## Setup
 
 ### 1. Prerequisites
@@ -461,6 +516,26 @@ any of it:
   the `PUBLIC_ROUTES` exemption in `lib/supabase/middleware.ts` actually
   works, not just that the code reads like it should.
 
+**AI response drafting (Phase 6.1)** is tested the same way —
+`response-draft-service.test.ts` exercises generation (context assembly,
+prompt content, the reply-subject logic), every safety gate (Do Not
+Contact, conversation-level suppression, `OPT_OUT`, unclassified/failed
+classification, no sales strategy on file, and confirming `WRONG_PERSON`
+is *not* a hard block), reuse/dedup, and `forceRegenerate`, all against
+a mocked `AIProvider` and a fake Supabase client — no real
+`ANTHROPIC_API_KEY` needed. `message-quality.test.ts` gained a matching
+`messageType: "RESPONSE"` suite confirming the relaxed rules (no
+business-name/evidence-anchor/contact-name requirement, a much lower
+minimum length) alongside the checks that stay strict either way
+(placeholders, URLs, and - importantly - a fabricated numeric claim not
+traceable to recorded evidence). `outreach-send-service.test.ts` and
+`outreach-draft-service.test.ts` gained cases confirming a response
+draft's send updates its conversation (`WAITING_FOR_THEM`, never the
+business's `pipeline_status`) and that edit/approve/send on a response
+draft log the `RESPONSE_*`-prefixed activity types instead of the
+generic outreach ones, with the original `INITIAL_OUTREACH` behavior
+(asserted in the same files) unchanged.
+
 ## Deployment (Vercel)
 
 1. Import the GitHub repo into a **new** Vercel project (this repo isn't
@@ -531,6 +606,26 @@ any of it:
   retry (both Meta and Resend can and do redeliver) is detected via the
   Postgres `23505` error code and treated as a no-op, never a duplicate
   message or a duplicate classification call.
+- **AI response drafting (Phase 6.1)**: `generateResponseDraft`
+  (`lib/services/response-draft-service.ts`) is only ever reachable from
+  the two server actions in `app/actions/responses.ts`, which take
+  nothing from the client but a conversation ID - the business, contact,
+  conversation, latest inbound message, its classification, the active
+  sales strategy, and the opportunity behind it are all reloaded
+  server-side from that ID, never trusted from the request. No inbound
+  webhook or classification code path calls this service - generation
+  only ever happens from an explicit "Generate Response"/"Regenerate"
+  click (verified by grepping the diff for call sites of
+  `generateResponseDraft`/`sendOutreachMessage`/the provider factories,
+  confirming the only real callers are the intended server actions and
+  `lib/outreach/`/`lib/services/outreach-send-service.ts` themselves - see
+  the Phase 6.1 report). A response draft is an ordinary `outreach_drafts`
+  row, so it inherits that table's existing RLS policies unchanged - no
+  new table, no new policy needed. The AI can draft text; it has no code
+  path that can call an `OutreachProvider` or otherwise cause a message
+  to actually leave the system - only the existing, unchanged
+  `sendOutreachMessage` can do that, and only after a human explicitly
+  approves and confirms.
 
 ## Troubleshooting
 
@@ -542,6 +637,61 @@ any of it:
 - **New user can't see any data**: RLS requires an authenticated session;
   confirm the user was created via the Dashboard (not some other path) and
   that `public.profiles` has a matching row.
+
+## Known limitations (Phase 6.1)
+
+- **WhatsApp responses go out through the same pre-approved template as
+  cold outreach - there is no free-form/session-message send path.**
+  This is a deliberate choice, not an oversight (see spec section 21's
+  own instruction to never bypass the existing template-based
+  architecture): Meta's Cloud API does allow free-form replies within
+  the 24-hour customer-service window a genuine reply falls into, but
+  building that second send mode into `WhatsAppCloudApiProvider` was
+  judged riskier than reusing the exact mechanism Phase 5 already
+  shipped. In practice this works correctly today only because the
+  configured template is a single body-variable passthrough (see
+  "Sending setup") - the approved draft text becomes that one variable,
+  so a reply reads the same as a cold message would. If a future
+  template ever adds fixed surrounding text meant only for first-touch
+  outreach, that same wrapper would incorrectly appear around every
+  response too; this isn't addressed by this phase's code, only worth
+  knowing when designing any future WhatsApp template in Meta Business
+  Manager.
+- **No live AI generation or live send was tested in this environment**
+  - no `ANTHROPIC_API_KEY`/`WHATSAPP_*`/`RESEND_*` credentials exist
+    here (same limitation as every previous phase). What was verified:
+  the full generation/validation/dedup/safety logic against 20 new
+  Vitest tests with a mocked `AIProvider`, and that editing/approving/
+  sending a response draft correctly reuses the exact same, already
+  live-testable-elsewhere Phase 4/5 code path (nothing new to verify
+  live there, since nothing about `sendOutreachMessage` itself changed
+  except which activity type it logs and one small conversation-state
+  update). See the Phase 6.1 report for the precise breakdown.
+- **No personalization score is computed for a response draft** - the
+  cold-outreach rubric weighs business-name, contact-name, and
+  evidence-anchor references, none of which a short natural reply needs;
+  storing a low, not-actually-meaningful number would misrepresent
+  quality rather than measure it, so the field is left `null` (the
+  existing draft card already renders nothing when it's `null`). Full
+  deterministic *validation* (placeholders, suspicious URLs, fabricated
+  numeric claims not traceable to evidence, minimum length, and - for
+  email - a subject line) still runs on every response draft.
+- **A response draft's "original opportunity/sales strategy" is always
+  the business's current ACTIVE sales strategy**, not necessarily the
+  literal one behind whatever was originally sent (if the strategy was
+  since regenerated/superseded, the newest one is used). This matches
+  how the conversation page's own "Opportunity" card and response
+  classification already resolve context - consistent, not a new gap.
+- **Generating a response draft requires an active sales strategy to
+  already exist for the business.** If a prospect replies to a business
+  that was never taken through Generate Outreach (e.g. a genuinely cold
+  inbound message), "Generate Response" fails with a clear message
+  rather than inventing a service/opportunity to draft against - run
+  Generate Outreach from the prospect page first.
+- **The rationale shown per draft is exactly what the AI returned**,
+  never independently re-derived or verified - it's a plain-language
+  explanation, not a claim that's been fact-checked separately from the
+  message itself.
 
 ## Known limitations (Phase 6)
 
@@ -745,24 +895,33 @@ any of it:
 
 ## Roadmap
 
-Phase 6 (this phase) added inbound response tracking and sales
-intelligence — official WhatsApp/Resend webhooks, AI-assisted intent/
-sentiment/urgency classification behind the existing `AIProvider`
-abstraction, a deterministic recommended-next-action engine, the
-`/responses` dashboard and conversation page, prospect-page and overview
+Phase 6 added inbound response tracking and sales intelligence —
+official WhatsApp/Resend webhooks, AI-assisted intent/sentiment/urgency
+classification behind the existing `AIProvider` abstraction, a
+deterministic recommended-next-action engine, the `/responses`
+dashboard and conversation page, prospect-page and overview
 integration, opt-out suppression, and CRM sync (CONTACTED → REPLIED
-only — never further) — per this phase's explicit instructions. The
-system still never replies, negotiates, or follows up automatically;
-every response is a human decision.
+only — never further). Phase 6.1 (this phase) closed the loop Phase 6
+deliberately left open: from a conversation, a human can now click
+Generate Response to get an AI-drafted reply grounded in that specific
+conversation — reusing `outreach_drafts` and the entire existing
+approve → Send pipeline rather than a second messaging system — edit
+it, and send it. The system still never replies, negotiates, or follows
+up automatically; every draft and every send is a human decision, and
+generation itself only ever runs from an explicit click, never from the
+webhook or classification path.
 
-Recommended next (per the Phase 6 report): **Phase 6.1 — Draft Response**,
-the one feature this phase's own spec explicitly sanctioned deferring —
-an AI-drafted reply (reusing the existing `OutreachDraftService`/Send
-pipeline, never a second send mechanism, never auto-sent) a human can
-edit and approve from the conversation page, closing the loop from
-"see what they said" to "respond" without leaving the app. Beyond that,
-see `PROJECT_AUDIT.md` for the rest of the phase plan (Dating App
-Growth, Signatures, Marketing Intelligence, AI Growth Advisor,
-Automation, Production Hardening). Note the phase numbering has
-diverged from `PROJECT_AUDIT.md`'s original Phase 0 plan since Phase 5;
-see the Phase 4 report for that discrepancy.
+This closes out the human-controlled sales loop the last several phases
+built toward: find leads → research → audit → identify an opportunity →
+build a strategy → generate outreach → human approval → send → detect a
+response → understand it → recommend a next action → **draft a
+reply → human edits/approves → send** → track the conversation. Nothing
+in that loop sends, negotiates, or follows up without a human in the
+middle of every step that leaves the building.
+
+Beyond this, see `PROJECT_AUDIT.md` for the rest of the phase plan
+(Dating App Growth, Signatures, Marketing Intelligence, AI Growth
+Advisor, Automation, Production Hardening) — none of which is in scope
+until explicitly requested. Note the phase numbering has diverged from
+`PROJECT_AUDIT.md`'s original Phase 0 plan since Phase 5; see the
+Phase 4 report for that discrepancy.

@@ -89,6 +89,63 @@ describe("validateMessage", () => {
   })
 })
 
+describe("validateMessage - RESPONSE (Phase 6.1)", () => {
+  it("passes a short, natural reply that never mentions the business name or the original evidence", () => {
+    const result = validateMessage(
+      context({
+        messageType: "RESPONSE",
+        body: "Absolutely - what time on Tuesday works best for you?",
+      })
+    )
+    expect(result.status).toBe("PASSED")
+    expect(result.issues).toEqual([])
+  })
+
+  it("does not flag a response for missing the business name (unlike an INITIAL_OUTREACH draft)", () => {
+    const result = validateMessage(context({ messageType: "RESPONSE", body: "Sure, happy to explain more - what would you like to know?" }))
+    expect(result.issues.some((i) => i.code === "MISSING_BUSINESS_NAME")).toBe(false)
+  })
+
+  it("does not flag a response for missing an evidence anchor (unlike an INITIAL_OUTREACH draft)", () => {
+    const result = validateMessage(context({ messageType: "RESPONSE", body: "Sure, happy to explain more - what would you like to know?" }))
+    expect(result.issues.some((i) => i.code === "MISSING_EVIDENCE_ANCHOR")).toBe(false)
+  })
+
+  it("still flags a fabricated numeric claim not traceable to recorded evidence, even in a response", () => {
+    const result = validateMessage(
+      context({
+        messageType: "RESPONSE",
+        body: "Sure - a package like that usually runs about $500 and takes 47% less time.",
+        evidenceText: "The website has no visible booking form; customers must call to book a class.",
+      })
+    )
+    expect(result.issues.some((i) => i.code === "UNSUPPORTED_STATISTIC")).toBe(true)
+  })
+
+  it("still flags a placeholder or a URL in a response", () => {
+    const placeholderResult = validateMessage(context({ messageType: "RESPONSE", body: "Hi [Name], happy to help." }))
+    expect(placeholderResult.issues.some((i) => i.code === "UNFILLED_PLACEHOLDER")).toBe(true)
+
+    const urlResult = validateMessage(context({ messageType: "RESPONSE", body: "Sure, see https://example.com for more." }))
+    expect(urlResult.issues.some((i) => i.code === "SUSPICIOUS_URL")).toBe(true)
+  })
+
+  it("allows a much shorter reply than an INITIAL_OUTREACH message would need", () => {
+    const result = validateMessage(context({ messageType: "RESPONSE", body: "Sounds good!" }))
+    expect(result.issues.some((i) => i.code === "TOO_SHORT")).toBe(false)
+  })
+
+  it("still rejects an empty or near-empty response body", () => {
+    const result = validateMessage(context({ messageType: "RESPONSE", body: "ok" }))
+    expect(result.issues.some((i) => i.code === "TOO_SHORT")).toBe(true)
+  })
+
+  it("still requires a subject line for an email response", () => {
+    const result = validateMessage(context({ messageType: "RESPONSE", channel: "EMAIL", subject: null, body: "Sure, happy to help with that." }))
+    expect(result.issues.some((i) => i.code === "MISSING_SUBJECT")).toBe(true)
+  })
+})
+
 describe("computePersonalizationScore", () => {
   it("scores a fully personalized, evidence-grounded message highly", () => {
     const result = computePersonalizationScore(context())

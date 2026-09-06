@@ -121,6 +121,12 @@ export function OutreachDraftCard({
         </form>
       ) : (
         <>
+          {draft.rationale && (
+            <p className="text-xs text-muted-foreground">
+              <span className="font-medium">Why this draft: </span>
+              {draft.rationale}
+            </p>
+          )}
           {draft.subject && <p className="text-sm font-medium">Subject: {draft.subject}</p>}
           <p className="whitespace-pre-wrap text-sm">{draft.body}</p>
           <details className="text-xs text-muted-foreground">

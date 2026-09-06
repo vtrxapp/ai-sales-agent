@@ -1,7 +1,3 @@
-// Generated from the live Supabase schema (project kivqnyguyjqvoeypeqol) via
-// the Supabase MCP `generate_typescript_types` tool. Do not hand-edit -
-// regenerate after every migration instead.
-
 export type Json =
   | string
   | number
@@ -769,6 +765,7 @@ export type Database = {
           business_id: string
           channel: Database["public"]["Enums"]["outreach_channel"]
           contact_id: string | null
+          conversation_id: string | null
           created_at: string
           created_by: string | null
           generated_at: string
@@ -779,6 +776,8 @@ export type Database = {
           opportunity_id: string
           personalization_reasoning: Json
           personalization_score: number | null
+          rationale: string | null
+          response_to_message_id: string | null
           sales_strategy_id: string
           status: Database["public"]["Enums"]["outreach_draft_status"]
           subject: string | null
@@ -794,6 +793,7 @@ export type Database = {
           business_id: string
           channel: Database["public"]["Enums"]["outreach_channel"]
           contact_id?: string | null
+          conversation_id?: string | null
           created_at?: string
           created_by?: string | null
           generated_at?: string
@@ -804,6 +804,8 @@ export type Database = {
           opportunity_id: string
           personalization_reasoning?: Json
           personalization_score?: number | null
+          rationale?: string | null
+          response_to_message_id?: string | null
           sales_strategy_id: string
           status?: Database["public"]["Enums"]["outreach_draft_status"]
           subject?: string | null
@@ -819,6 +821,7 @@ export type Database = {
           business_id?: string
           channel?: Database["public"]["Enums"]["outreach_channel"]
           contact_id?: string | null
+          conversation_id?: string | null
           created_at?: string
           created_by?: string | null
           generated_at?: string
@@ -829,6 +832,8 @@ export type Database = {
           opportunity_id?: string
           personalization_reasoning?: Json
           personalization_score?: number | null
+          rationale?: string | null
+          response_to_message_id?: string | null
           sales_strategy_id?: string
           status?: Database["public"]["Enums"]["outreach_draft_status"]
           subject?: string | null
@@ -860,6 +865,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "outreach_drafts_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "outreach_drafts_created_by_fkey"
             columns: ["created_by"]
             isOneToOne: false
@@ -871,6 +883,13 @@ export type Database = {
             columns: ["opportunity_id"]
             isOneToOne: false
             referencedRelation: "opportunities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outreach_drafts_response_to_message_id_fkey"
+            columns: ["response_to_message_id"]
+            isOneToOne: false
+            referencedRelation: "inbound_messages"
             referencedColumns: ["id"]
           },
           {
@@ -1355,7 +1374,7 @@ export type Database = {
         | "CANCELLED"
         | "SENDING"
         | "FAILED"
-      outreach_message_type: "INITIAL_OUTREACH"
+      outreach_message_type: "INITIAL_OUTREACH" | "RESPONSE"
       outreach_variant: "RECOMMENDED" | "DIRECT" | "CONVERSATIONAL"
       pipeline_status:
         | "NEW"
@@ -1602,7 +1621,7 @@ export const Constants = {
         "SENDING",
         "FAILED",
       ],
-      outreach_message_type: ["INITIAL_OUTREACH"],
+      outreach_message_type: ["INITIAL_OUTREACH", "RESPONSE"],
       outreach_variant: ["RECOMMENDED", "DIRECT", "CONVERSATIONAL"],
       pipeline_status: [
         "NEW",

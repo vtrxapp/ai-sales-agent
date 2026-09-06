@@ -3,10 +3,15 @@ import { notFound } from "next/navigation"
 
 import { createClient } from "@/lib/supabase/server"
 import { getConversationDetail } from "@/lib/services/response-dashboard-service"
+import { listResponseDraftsForConversation } from "@/lib/services/response-draft-service"
+import { resolveRecipient, listSendAttempts } from "@/lib/services/outreach-send-service"
+import { getWhatsAppConfigStatus, getEmailConfigStatus } from "@/lib/outreach"
+import type { Tables } from "@/lib/types/database.types"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { ConversationActions } from "@/components/responses/conversation-actions"
 import { ReclassifyButton } from "@/components/responses/reclassify-button"
+import { ResponseComposer } from "@/components/responses/response-composer"
 
 export default async function ConversationDetailPage({
   params,
@@ -20,6 +25,40 @@ export default async function ConversationDetailPage({
 
   const { conversation, business, contact, strategy, leadScore, timeline } = detail
   const latestInbound = [...timeline].reverse().find((t) => t.direction === "INBOUND")
+  const latestInboundMessage = latestInbound?.direction === "INBOUND" ? latestInbound.message : null
+
+  const [responseDrafts, sendAttempts] = await Promise.all([
+    listResponseDraftsForConversation(supabase, conversationId),
+    listSendAttempts(supabase, business.id),
+  ])
+
+  const latestAttemptByDraft = new Map<string, Tables<"outreach_send_attempts">>()
+  for (const attempt of sendAttempts) {
+    if (!latestAttemptByDraft.has(attempt.outreach_draft_id)) {
+      latestAttemptByDraft.set(attempt.outreach_draft_id, attempt)
+    }
+  }
+
+  // Mirrors the prospect page's own sendContextFor - a preview only, the
+  // send action re-verifies all of this itself server-side regardless.
+  function sendContextForChannel(channel: typeof conversation.channel) {
+    if (channel === "WHATSAPP") {
+      const status = getWhatsAppConfigStatus()
+      return { providerConfigured: status.configured, senderIdentity: status.configured ? status.phoneNumberId : null }
+    }
+    const status = getEmailConfigStatus()
+    return { providerConfigured: status.configured, senderIdentity: status.configured ? status.fromEmail : null }
+  }
+  const { providerConfigured, senderIdentity } = sendContextForChannel(conversation.channel)
+  const recipient = resolveRecipient(conversation.channel, contact, business)
+
+  const currentRoundDrafts = latestInboundMessage
+    ? responseDrafts.filter((d) => d.response_to_message_id === latestInboundMessage.id)
+    : []
+  const priorRoundDrafts = latestInboundMessage
+    ? responseDrafts.filter((d) => d.response_to_message_id !== latestInboundMessage.id)
+    : responseDrafts
+  const isOptedOut = business.do_not_contact || conversation.status === "DO_NOT_CONTACT" || latestInboundMessage?.intent === "OPT_OUT"
 
   return (
     <div className="flex flex-col gap-6">
@@ -129,6 +168,32 @@ export default async function ConversationDetailPage({
             <div>
               <ReclassifyButton messageId={latestInbound.message.id} conversationId={conversation.id} />
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {latestInboundMessage && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Your response</CardTitle>
+            <CardDescription>
+              AI drafts a starting point from this conversation - you review, edit, and approve before anything sends
+              through the same Send workflow as any other message.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ResponseComposer
+              conversationId={conversation.id}
+              businessId={business.id}
+              businessName={business.name}
+              isOptedOut={isOptedOut}
+              currentRoundDrafts={currentRoundDrafts}
+              priorRoundDrafts={priorRoundDrafts}
+              recipient={recipient}
+              senderIdentity={senderIdentity}
+              providerConfigured={providerConfigured}
+              latestSendAttemptByDraft={latestAttemptByDraft}
+            />
           </CardContent>
         </Card>
       )}

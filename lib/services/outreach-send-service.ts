@@ -171,6 +171,14 @@ export async function sendOutreachMessage(
       outreach_draft_id: draft.id,
       business_id: business.id,
       contact_id: contact?.id ?? null,
+      // Set directly from the draft rather than looked up separately -
+      // a response draft already carries the conversation it belongs to
+      // (an initial-outreach draft has none yet, same as before this
+      // column existed). This is what makes a sent response appear in
+      // the conversation timeline immediately (spec section 22) instead
+      // of depending on the one-time backfill in findOrCreateConversation,
+      // which only ever runs once, when the conversation is first created.
+      conversation_id: draft.conversation_id,
       channel: draft.channel,
       provider: provider.providerName,
       recipient_address: recipientAddress,
@@ -239,10 +247,27 @@ export async function sendOutreachMessage(
       throw new Error(`Failed to update draft status after send: ${draftUpdateError?.message ?? "draft row missing"}`)
     }
 
+    // A response just sent means the ball is back in the prospect's
+    // court - flips the conversation out of WAITING_FOR_US (spec section
+    // 22: "clear needsResponse" / show "Waiting for prospect" instead of
+    // "Needs response"). Never touches business.pipeline_status - sending
+    // a reply is not the same as the deal progressing (spec section 23).
+    if (sentDraft.conversation_id) {
+      const { error: conversationUpdateError } = await supabase
+        .from("conversations")
+        .update({ status: "WAITING_FOR_THEM", last_outbound_at: completedAt, last_message_at: completedAt })
+        .eq("id", sentDraft.conversation_id)
+        .select()
+        .single()
+      if (conversationUpdateError) {
+        throw new Error(`Failed to update conversation after send: ${conversationUpdateError.message}`)
+      }
+    }
+
     await logActivity(supabase, {
       entityType: "business",
       entityId: business.id,
-      activityType: "OUTREACH_SENT",
+      activityType: sentDraft.message_type === "RESPONSE" ? "RESPONSE_SENT" : "OUTREACH_SENT",
       description: `${draft.channel} message sent to ${business.name} via ${provider.providerName}.`,
       actorId,
       metadata: {

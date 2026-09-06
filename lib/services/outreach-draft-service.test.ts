@@ -345,6 +345,9 @@ describe("editOutreachDraft / approveOutreachDraft / rejectOutreachDraft", () =>
       contact_id: "contact-1",
       opportunity_id: "opp-1",
       sales_strategy_id: "strategy-1",
+      conversation_id: null,
+      response_to_message_id: null,
+      rationale: null,
       channel: "WHATSAPP",
       message_type: "INITIAL_OUTREACH",
       variant: "RECOMMENDED",
@@ -447,5 +450,45 @@ describe("editOutreachDraft / approveOutreachDraft / rejectOutreachDraft", () =>
       await expect(rejectOutreachDraft(client, "draft-1", "user-1")).rejects.toThrow(/already/i)
       expect(store.outreach_drafts[0].status).toBe(status)
     }
+  })
+
+  it("edit on a RESPONSE draft logs RESPONSE_DRAFT_EDITED (not the generic outreach type) and keeps personalization_score null", async () => {
+    const { client, store } = seedWithDraft({
+      message_type: "RESPONSE",
+      conversation_id: "conv-1",
+      response_to_message_id: "msg-1",
+      rationale: "Original rationale.",
+      personalization_score: null,
+      personalization_reasoning: {},
+    })
+
+    const updated = await editOutreachDraft(client, "draft-1", { body: "Sure - what time works for you?" }, "user-1")
+
+    expect(updated.personalization_score).toBeNull()
+    expect(store.activities.some((a) => a.activity_type === "RESPONSE_DRAFT_EDITED")).toBe(true)
+    expect(store.activities.some((a) => a.activity_type === "OUTREACH_DRAFT_UPDATED")).toBe(false)
+  })
+
+  it("approve on a RESPONSE draft logs RESPONSE_DRAFT_APPROVED (not the generic outreach type)", async () => {
+    const { client, store } = seedWithDraft({
+      message_type: "RESPONSE",
+      conversation_id: "conv-1",
+      response_to_message_id: "msg-1",
+      validation_status: "PASSED",
+    })
+
+    await approveOutreachDraft(client, "draft-1", "user-1")
+
+    expect(store.activities.some((a) => a.activity_type === "RESPONSE_DRAFT_APPROVED")).toBe(true)
+    expect(store.activities.some((a) => a.activity_type === "OUTREACH_DRAFT_APPROVED")).toBe(false)
+  })
+
+  it("edit on an INITIAL_OUTREACH draft still logs the original generic activity type (no regression)", async () => {
+    const { client, store } = seedWithDraft()
+
+    await editOutreachDraft(client, "draft-1", { body: "Hi Jane, ABC Gym has no online booking - a fresh idea from Zviko Labs?" }, "user-1")
+
+    expect(store.activities.some((a) => a.activity_type === "OUTREACH_DRAFT_UPDATED")).toBe(true)
+    expect(store.activities.some((a) => a.activity_type === "RESPONSE_DRAFT_EDITED")).toBe(false)
   })
 })

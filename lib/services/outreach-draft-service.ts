@@ -200,7 +200,7 @@ export async function generateOutreachDrafts(
 
 async function buildQualityContextForDraft(
   supabase: SupabaseClient<Database>,
-  draft: Pick<Tables<"outreach_drafts">, "business_id" | "opportunity_id" | "contact_id" | "channel" | "sales_strategy_id">,
+  draft: Pick<Tables<"outreach_drafts">, "business_id" | "opportunity_id" | "contact_id" | "channel" | "sales_strategy_id" | "message_type">,
   overrides: { subject: string | null; body: string }
 ): Promise<MessageQualityContext> {
   const [businessResult, opportunityResult, contactResult, strategyResult] = await Promise.all([
@@ -233,6 +233,7 @@ async function buildQualityContextForDraft(
     country: business.country,
     subject: overrides.subject,
     body: overrides.body,
+    messageType: draft.message_type === "RESPONSE" ? "RESPONSE" : "INITIAL_OUTREACH",
   }
 }
 
@@ -260,8 +261,11 @@ export async function editOutreachDraft(
   const subject = input.subject ?? null
   const qualityContext = await buildQualityContextForDraft(supabase, existing, { subject, body: input.body })
   const validation = validateMessage(qualityContext)
-  const personalization = computePersonalizationScore(qualityContext)
+  // No personalization score for a response draft - see the matching
+  // note in response-draft-service.ts for why the rubric doesn't apply.
+  const personalization = existing.message_type === "RESPONSE" ? null : computePersonalizationScore(qualityContext)
   const newStatus: Enums<"outreach_draft_status"> = validation.status === "FAILED" ? "NEEDS_REVIEW" : "DRAFT"
+  const isResponse = existing.message_type === "RESPONSE"
 
   const { data: updated, error } = await supabase
     .from("outreach_drafts")
@@ -270,8 +274,8 @@ export async function editOutreachDraft(
       body: input.body,
       validation_status: validation.status,
       validation_errors: validation.issues,
-      personalization_score: personalization.score,
-      personalization_reasoning: personalization.breakdown,
+      personalization_score: personalization?.score ?? null,
+      personalization_reasoning: personalization?.breakdown ?? {},
       is_user_edited: true,
       status: newStatus,
       approved_at: null,
@@ -285,8 +289,10 @@ export async function editOutreachDraft(
   await logActivity(supabase, {
     entityType: "business",
     entityId: updated.business_id,
-    activityType: "OUTREACH_DRAFT_UPDATED",
-    description: `Outreach draft edited by hand (personalization ${personalization.score}/100, validation ${validation.status}).`,
+    activityType: isResponse ? "RESPONSE_DRAFT_EDITED" : "OUTREACH_DRAFT_UPDATED",
+    description: isResponse
+      ? `Response draft edited by hand (validation ${validation.status}).`
+      : `Outreach draft edited by hand (personalization ${personalization?.score}/100, validation ${validation.status}).`,
     productId: null,
     actorId,
     metadata: { draft_id: updated.id, validation_status: validation.status },
@@ -332,8 +338,8 @@ export async function approveOutreachDraft(
   await logActivity(supabase, {
     entityType: "business",
     entityId: updated.business_id,
-    activityType: "OUTREACH_DRAFT_APPROVED",
-    description: `Outreach draft approved and marked ready to send (${updated.channel}, ${updated.variant}). Not sent - actually sending is a later phase.`,
+    activityType: updated.message_type === "RESPONSE" ? "RESPONSE_DRAFT_APPROVED" : "OUTREACH_DRAFT_APPROVED",
+    description: `${updated.message_type === "RESPONSE" ? "Response draft" : "Outreach draft"} approved and marked ready to send (${updated.channel}, ${updated.variant}). Not sent yet - sending is a separate, explicit step.`,
     productId: null,
     actorId,
     metadata: { draft_id: updated.id, channel: updated.channel },

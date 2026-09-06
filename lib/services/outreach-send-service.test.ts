@@ -71,6 +71,9 @@ function draft(overrides: Partial<Tables<"outreach_drafts">> = {}): Tables<"outr
     contact_id: "contact-1",
     opportunity_id: "opp-1",
     sales_strategy_id: "strategy-1",
+    conversation_id: null,
+    response_to_message_id: null,
+    rationale: null,
     channel: "WHATSAPP",
     message_type: "INITIAL_OUTREACH",
     variant: "RECOMMENDED",
@@ -99,6 +102,7 @@ function fakeSupabase(seed: Partial<Store>) {
   const store: Store = {
     businesses: [],
     contacts: [],
+    conversations: [],
     outreach_drafts: [],
     outreach_send_attempts: [],
     activities: [],
@@ -396,6 +400,54 @@ describe("sendOutreachMessage", () => {
     if (outcome.outcome !== "SENT") throw new Error("expected SENT")
     expect(outcome.sendAttempt.recipient_address).toBe("jane@abcgym.co.zw")
     expect(outcome.sendAttempt.message_subject).toBe("Quick idea")
+  })
+
+  it("propagates the draft's conversation_id onto the send attempt and flips the conversation to WAITING_FOR_THEM (Phase 6.1)", async () => {
+    getOutreachProviderMock.mockReturnValue(new MockWhatsAppProvider())
+    const { client, store } = fakeSupabase({
+      businesses: [business()],
+      contacts: [contact()],
+      conversations: [
+        {
+          id: "conv-1",
+          business_id: "biz-1",
+          status: "WAITING_FOR_US",
+          last_outbound_at: null,
+          last_message_at: null,
+          unread_count: 1,
+        },
+      ],
+      outreach_drafts: [draft({ conversation_id: "conv-1", message_type: "RESPONSE", response_to_message_id: "msg-1", rationale: "They asked a question." })],
+    })
+
+    const outcome = await sendOutreachMessage(client, "draft-1", "user-1")
+
+    expect(outcome.outcome).toBe("SENT")
+    if (outcome.outcome !== "SENT") throw new Error("expected SENT")
+    expect(outcome.sendAttempt.conversation_id).toBe("conv-1")
+    expect(store.conversations[0].status).toBe("WAITING_FOR_THEM")
+    expect(store.conversations[0].last_outbound_at).not.toBeNull()
+    // Sending a response never touches the business's own pipeline_status
+    // (spec section 23) - only the conversation row changes.
+    expect(store.businesses[0].pipeline_status).toBe(business().pipeline_status)
+    expect(store.activities.map((a) => a.activity_type)).toEqual(expect.arrayContaining(["RESPONSE_SENT"]))
+    expect(store.activities.some((a) => a.activity_type === "OUTREACH_SENT")).toBe(false)
+  })
+
+  it("never touches any conversation when the draft has no conversation_id (ordinary initial outreach, unchanged)", async () => {
+    getOutreachProviderMock.mockReturnValue(new MockWhatsAppProvider())
+    const { client, store } = fakeSupabase({
+      businesses: [business()],
+      contacts: [contact()],
+      conversations: [{ id: "conv-1", business_id: "biz-1", status: "WAITING_FOR_US", last_outbound_at: null, last_message_at: null, unread_count: 1 }],
+      outreach_drafts: [draft()],
+    })
+
+    const outcome = await sendOutreachMessage(client, "draft-1", "user-1")
+
+    expect(outcome.outcome).toBe("SENT")
+    expect(store.conversations[0].status).toBe("WAITING_FOR_US")
+    expect(store.activities.map((a) => a.activity_type)).toEqual(expect.arrayContaining(["OUTREACH_SENT"]))
   })
 })
 

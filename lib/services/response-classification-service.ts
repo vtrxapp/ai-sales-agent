@@ -46,8 +46,10 @@ Classify this message now.`
 // Builds a short chronological transcript from what's already
 // available (recent inbound_messages + outreach_send_attempts for this
 // conversation) rather than a fresh AI call or web search - the AI only
-// ever sees what actually happened in this conversation.
-async function buildConversationContext(
+// ever sees what actually happened in this conversation. Exported so
+// response-draft-service.ts (Phase 6.1) can reuse the exact same
+// transcript-building logic rather than a second implementation.
+export async function buildConversationContext(
   supabase: SupabaseClient<Database>,
   conversationId: string,
   excludingMessageId: string

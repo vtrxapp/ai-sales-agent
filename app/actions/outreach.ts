@@ -17,6 +17,20 @@ import { setDoNotContact, clearDoNotContact } from "@/lib/services/business-serv
 
 export type ActionState = { error?: string; success?: string } | null
 
+// A response draft (Phase 6.1) is an outreach_drafts row like any other,
+// edited/approved/sent through these same actions - so a change to one
+// must also refresh the conversation page it's shown on, not just the
+// prospect page these actions were originally written for. conversationId
+// comes from the draft row itself (already reloaded server-side by the
+// service call above each use), never from client input.
+function revalidateForDraft(businessId: string, conversationId: string | null) {
+  revalidatePath(`/prospects/${businessId}`)
+  if (conversationId) {
+    revalidatePath(`/responses/${conversationId}`)
+    revalidatePath("/responses")
+  }
+}
+
 // Shared by generateOutreachAction/regenerateOutreachAction - the only
 // difference between them is forceRegenerate, so this is the single
 // place implementing the section 22 workflow: load evidence -> generate
@@ -109,17 +123,18 @@ export async function editOutreachDraftAction(
 
   try {
     const supabase = await createClient()
-    await editOutreachDraft(
+    const updated = await editOutreachDraft(
       supabase,
       draftId,
       { subject: typeof subject === "string" && subject.trim().length > 0 ? subject : null, body },
       user.id
     )
+    revalidateForDraft(businessId, updated.conversation_id)
   } catch (err) {
+    revalidatePath(`/prospects/${businessId}`)
     return { error: err instanceof Error ? err.message : "Failed to update draft." }
   }
 
-  revalidatePath(`/prospects/${businessId}`)
   return { success: "Draft updated and re-validated." }
 }
 
@@ -134,12 +149,13 @@ export async function approveOutreachDraftAction(
 
   try {
     const supabase = await createClient()
-    await approveOutreachDraft(supabase, draftId, user.id)
+    const updated = await approveOutreachDraft(supabase, draftId, user.id)
+    revalidateForDraft(businessId, updated.conversation_id)
   } catch (err) {
+    revalidatePath(`/prospects/${businessId}`)
     return { error: err instanceof Error ? err.message : "Failed to approve draft." }
   }
 
-  revalidatePath(`/prospects/${businessId}`)
   return { success: "Draft approved and marked ready to send. Nothing has been sent yet - review it and click Send when ready." }
 }
 
@@ -154,12 +170,13 @@ export async function rejectOutreachDraftAction(
 
   try {
     const supabase = await createClient()
-    await rejectOutreachDraft(supabase, draftId, user.id)
+    const updated = await rejectOutreachDraft(supabase, draftId, user.id)
+    revalidateForDraft(businessId, updated.conversation_id)
   } catch (err) {
+    revalidatePath(`/prospects/${businessId}`)
     return { error: err instanceof Error ? err.message : "Failed to reject draft." }
   }
 
-  revalidatePath(`/prospects/${businessId}`)
   return { success: "Draft rejected." }
 }
 
@@ -197,11 +214,12 @@ export async function sendOutreachDraftAction(
     const supabase = await createClient()
     const outcome = await sendOutreachMessage(supabase, draftId, user.id)
     result = describeSendOutcome(outcome)
+    revalidateForDraft(businessId, outcome.outcome === "BLOCKED" ? null : outcome.draft.conversation_id)
   } catch (err) {
+    revalidatePath(`/prospects/${businessId}`)
     result = { error: err instanceof Error ? err.message : "Failed to send message." }
   }
 
-  revalidatePath(`/prospects/${businessId}`)
   return result
 }
 
@@ -219,11 +237,12 @@ export async function retryOutreachSendAction(
     const supabase = await createClient()
     const outcome = await retryOutreachSend(supabase, draftId, user.id)
     result = describeSendOutcome(outcome)
+    revalidateForDraft(businessId, outcome.outcome === "BLOCKED" ? null : outcome.draft.conversation_id)
   } catch (err) {
+    revalidatePath(`/prospects/${businessId}`)
     result = { error: err instanceof Error ? err.message : "Failed to retry send." }
   }
 
-  revalidatePath(`/prospects/${businessId}`)
   return result
 }
 

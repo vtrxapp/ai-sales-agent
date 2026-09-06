@@ -24,6 +24,13 @@ export type MessageQualityContext = {
   country: string | null
   subject: string | null
   body: string
+  // Defaults to INITIAL_OUTREACH behavior when omitted, so every existing
+  // call site (cold first-touch drafts) is unaffected. A RESPONSE is a
+  // reply within an already-established conversation - it's reasonable
+  // for it not to restate the business name or re-cite the original
+  // audit evidence the way a cold-outreach message must, and a natural
+  // reply can legitimately be shorter than a first-touch message.
+  messageType?: "INITIAL_OUTREACH" | "RESPONSE"
 }
 
 export type ValidationIssue = {
@@ -94,12 +101,18 @@ export function validateMessage(context: MessageQualityContext): ValidationResul
   const issues: ValidationIssue[] = []
   const bodyLower = context.body.toLowerCase()
   const fullText = `${context.subject ?? ""} ${context.body}`
+  const isResponse = context.messageType === "RESPONSE"
 
-  if (!bodyLower.includes(context.businessName.toLowerCase())) {
+  // A reply within an established conversation isn't cold outreach - it
+  // doesn't need to restate the business/contact name or re-cite the
+  // original audit evidence every time (spec section 8: avoid
+  // "unnecessary paragraphs"/"irrelevant company information" - forcing
+  // these in would actively push toward exactly that).
+  if (!isResponse && !bodyLower.includes(context.businessName.toLowerCase())) {
     issues.push({ code: "MISSING_BUSINESS_NAME", message: "The message never mentions the business by name." })
   }
 
-  if (context.contactName) {
+  if (!isResponse && context.contactName) {
     const firstName = context.contactName.toLowerCase().split(" ")[0]
     if (!bodyLower.includes(firstName)) {
       issues.push({
@@ -117,7 +130,11 @@ export function validateMessage(context: MessageQualityContext): ValidationResul
   }
 
   const maxLength = context.channel === "WHATSAPP" ? 700 : 1400
-  const minLength = context.channel === "WHATSAPP" ? 40 : 80
+  // A genuine reply ("Sure, Tuesday 2pm works!") can be much shorter than
+  // a first-touch message still needs to be to plausibly reference real
+  // evidence - the response minimum only guards against an empty/broken
+  // generation, not against natural brevity.
+  const minLength = isResponse ? 8 : context.channel === "WHATSAPP" ? 40 : 80
   if (context.body.length > maxLength) {
     issues.push({
       code: "EXCESSIVE_LENGTH",
@@ -127,7 +144,9 @@ export function validateMessage(context: MessageQualityContext): ValidationResul
   if (context.body.length < minLength) {
     issues.push({
       code: "TOO_SHORT",
-      message: "The message is too short to plausibly reference real evidence about this business.",
+      message: isResponse
+        ? "The message looks too short to be a real reply - it may be empty or truncated."
+        : "The message is too short to plausibly reference real evidence about this business.",
     })
   }
 
@@ -154,7 +173,7 @@ export function validateMessage(context: MessageQualityContext): ValidationResul
     }
   }
 
-  if (!hasEvidenceOverlap(context)) {
+  if (!isResponse && !hasEvidenceOverlap(context)) {
     issues.push({
       code: "MISSING_EVIDENCE_ANCHOR",
       message: "The message doesn't appear to reference anything specific from the recorded opportunity evidence.",

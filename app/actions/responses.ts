@@ -8,8 +8,57 @@ import { getAIProvider, AIError } from "@/lib/ai"
 import { classifyInboundMessage } from "@/lib/services/response-classification-service"
 import { logActivity } from "@/lib/services/activity-service"
 import { findOrCreateConversation } from "@/lib/services/response-matching-service"
+import { generateResponseDraft } from "@/lib/services/response-draft-service"
 
 export type ActionState = { error?: string; success?: string } | null
+
+// Shared by generateResponseDraftAction/regenerateResponseDraftAction -
+// forceRegenerate is the only difference, matching the same
+// generate/regenerate pattern app/actions/outreach.ts uses for
+// cold-outreach drafts. Only ever reachable from an explicit button
+// click in the UI - never called from the webhook/classification path,
+// so no reply is ever drafted (let alone sent) without a human asking
+// for one (spec section 27).
+async function runGenerateResponseDraft(
+  conversationId: string,
+  actorId: string,
+  forceRegenerate: boolean
+): Promise<ActionState> {
+  try {
+    const ai = getAIProvider()
+    const supabase = await createClient()
+    const result = await generateResponseDraft(supabase, ai, conversationId, actorId, forceRegenerate)
+
+    switch (result.outcome) {
+      case "BLOCKED":
+        return { error: result.reason }
+      case "REUSED":
+        return { success: `Showing the existing response draft${result.drafts.length === 1 ? "" : "s"} for this message - use Regenerate for a fresh one.` }
+      case "GENERATED":
+        return { success: `${result.drafts.length} response draft${result.drafts.length === 1 ? "" : "s"} generated. Review before approving.` }
+    }
+  } catch (err) {
+    if (err instanceof AIError) return { error: err.message }
+    return { error: err instanceof Error ? err.message : "Failed to generate a response draft." }
+  } finally {
+    revalidatePath(`/responses/${conversationId}`)
+    revalidatePath("/responses")
+  }
+}
+
+export async function generateResponseDraftAction(_prevState: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await requireUser()
+  const conversationId = formData.get("conversation_id")
+  if (typeof conversationId !== "string") return { error: "Missing conversation." }
+  return runGenerateResponseDraft(conversationId, user.id, false)
+}
+
+export async function regenerateResponseDraftAction(_prevState: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await requireUser()
+  const conversationId = formData.get("conversation_id")
+  if (typeof conversationId !== "string") return { error: "Missing conversation." }
+  return runGenerateResponseDraft(conversationId, user.id, true)
+}
 
 export async function markConversationReviewedAction(
   _prevState: ActionState,
