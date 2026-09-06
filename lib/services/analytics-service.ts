@@ -121,6 +121,52 @@ export type OutreachStats = {
   draftsAwaitingReview: number
   approvedDrafts: number
   highPriorityOpportunities: number
+  messagesSentByChannel: Record<Enums<"outreach_channel">, number>
+  sendFailures: number
+  /** 0-100, or null if there are no completed send attempts yet (never show a misleading 0%). */
+  sendSuccessRate: number | null
+  sentByIndustry: Record<string, number>
+}
+
+const EMPTY_CHANNEL_COUNTS: Record<Enums<"outreach_channel">, number> = { WHATSAPP: 0, EMAIL: 0 }
+
+export type SendAttemptStatsInput = { status: Enums<"send_attempt_status">; channel: Enums<"outreach_channel">; business_id: string }[]
+
+// Pure aggregation - unit-testable without mocking Supabase. Real counts
+// only (spec section 42): no reply/meeting/conversion metrics (those
+// need infrastructure this app doesn't have yet - Phase 6+).
+export function summarizeSendAttempts(
+  attempts: SendAttemptStatsInput,
+  industryByBusinessId: Map<string, string | null>
+): {
+  messagesSentByChannel: Record<Enums<"outreach_channel">, number>
+  sendFailures: number
+  sendSuccessRate: number | null
+  sentByIndustry: Record<string, number>
+} {
+  const messagesSentByChannel = { ...EMPTY_CHANNEL_COUNTS }
+  const sentByIndustry: Record<string, number> = {}
+  let sent = 0
+  let failed = 0
+
+  for (const attempt of attempts) {
+    if (attempt.status === "SENT") {
+      sent += 1
+      messagesSentByChannel[attempt.channel] += 1
+      const industry = industryByBusinessId.get(attempt.business_id) ?? "Unknown"
+      sentByIndustry[industry] = (sentByIndustry[industry] ?? 0) + 1
+    } else if (attempt.status === "FAILED") {
+      failed += 1
+    }
+  }
+
+  const completed = sent + failed
+  return {
+    messagesSentByChannel,
+    sendFailures: failed,
+    sendSuccessRate: completed > 0 ? Math.round((sent / completed) * 100) : null,
+    sentByIndustry,
+  }
 }
 
 // Real database counts only - no fabricated numbers (spec section 34).
@@ -128,15 +174,23 @@ export type OutreachStats = {
 // businesses, not row counts, since a business can have several
 // opportunities/one active strategy.
 export async function getOutreachStats(supabase: SupabaseClient<Database>): Promise<OutreachStats> {
-  const [qualifiedResult, opportunitiesResult, strategiesResult, needsReviewResult, approvedResult, highPriorityResult] =
-    await Promise.all([
-      supabase.from("businesses").select("*", { count: "exact", head: true }).eq("pipeline_status", "QUALIFIED"),
-      supabase.from("opportunities").select("business_id").not("status", "eq", "REJECTED").not("status", "eq", "CLOSED"),
-      supabase.from("sales_strategies").select("business_id, recommended_channel").eq("status", "ACTIVE"),
-      supabase.from("outreach_drafts").select("*", { count: "exact", head: true }).eq("status", "NEEDS_REVIEW"),
-      supabase.from("outreach_drafts").select("*", { count: "exact", head: true }).eq("status", "READY_TO_SEND"),
-      supabase.from("opportunities").select("status").in("priority", ["CRITICAL", "HIGH"]),
-    ])
+  const [
+    qualifiedResult,
+    opportunitiesResult,
+    strategiesResult,
+    needsReviewResult,
+    approvedResult,
+    highPriorityResult,
+    sendAttemptsResult,
+  ] = await Promise.all([
+    supabase.from("businesses").select("*", { count: "exact", head: true }).eq("pipeline_status", "QUALIFIED"),
+    supabase.from("opportunities").select("business_id").not("status", "eq", "REJECTED").not("status", "eq", "CLOSED"),
+    supabase.from("sales_strategies").select("business_id, recommended_channel").eq("status", "ACTIVE"),
+    supabase.from("outreach_drafts").select("*", { count: "exact", head: true }).eq("status", "NEEDS_REVIEW"),
+    supabase.from("outreach_drafts").select("*", { count: "exact", head: true }).eq("status", "READY_TO_SEND"),
+    supabase.from("opportunities").select("status").in("priority", ["CRITICAL", "HIGH"]),
+    supabase.from("outreach_send_attempts").select("status, channel, business_id"),
+  ])
 
   if (qualifiedResult.error) throw new Error(`Failed to load qualified prospect count: ${qualifiedResult.error.message}`)
   if (opportunitiesResult.error) throw new Error(`Failed to load opportunities: ${opportunitiesResult.error.message}`)
@@ -144,6 +198,7 @@ export async function getOutreachStats(supabase: SupabaseClient<Database>): Prom
   if (needsReviewResult.error) throw new Error(`Failed to load drafts needing review: ${needsReviewResult.error.message}`)
   if (approvedResult.error) throw new Error(`Failed to load approved drafts: ${approvedResult.error.message}`)
   if (highPriorityResult.error) throw new Error(`Failed to load high-priority opportunities: ${highPriorityResult.error.message}`)
+  if (sendAttemptsResult.error) throw new Error(`Failed to load send attempts: ${sendAttemptsResult.error.message}`)
 
   const prospectsWithOpportunities = new Set(opportunitiesResult.data.map((o) => o.business_id)).size
   const prospectsReadyForOutreach = new Set(
@@ -153,6 +208,18 @@ export async function getOutreachStats(supabase: SupabaseClient<Database>): Prom
     (o) => o.status !== "REJECTED" && o.status !== "CLOSED"
   ).length
 
+  const sentBusinessIds = [...new Set(sendAttemptsResult.data.map((a) => a.business_id))]
+  const industryByBusinessId = new Map<string, string | null>()
+  if (sentBusinessIds.length > 0) {
+    const { data: industries, error: industryError } = await supabase
+      .from("businesses")
+      .select("id, industry")
+      .in("id", sentBusinessIds)
+    if (industryError) throw new Error(`Failed to load business industries: ${industryError.message}`)
+    for (const b of industries) industryByBusinessId.set(b.id, b.industry)
+  }
+  const sendStats = summarizeSendAttempts(sendAttemptsResult.data, industryByBusinessId)
+
   return {
     qualifiedProspects: qualifiedResult.count ?? 0,
     prospectsWithOpportunities,
@@ -160,6 +227,7 @@ export async function getOutreachStats(supabase: SupabaseClient<Database>): Prom
     draftsAwaitingReview: needsReviewResult.count ?? 0,
     approvedDrafts: approvedResult.count ?? 0,
     highPriorityOpportunities,
+    ...sendStats,
   }
 }
 

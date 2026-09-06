@@ -34,7 +34,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Marketing", href: "/marketing", icon: Radio, comingInPhase: 7 },
   { label: "Signatures", href: "/signatures", icon: FileSignature, comingInPhase: 6 },
   { label: "Analytics", href: "/analytics", icon: BarChart3, comingInPhase: 7 },
-  { label: "Outreach", href: "/outreach", icon: Send, comingInPhase: 4 },
+  { label: "Outreach", href: "/outreach", icon: Send },
   { label: "Proposals", href: "/proposals", icon: FileText, comingInPhase: 4 },
   { label: "AI Assistant", href: "/assistant", icon: Sparkles, comingInPhase: 8 },
 ]

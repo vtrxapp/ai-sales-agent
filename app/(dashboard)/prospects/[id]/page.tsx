@@ -7,9 +7,12 @@ import { listRecentActivities } from "@/lib/services/activity-service"
 import { getNextAction, type NextAction } from "@/lib/services/next-action-service"
 import { listSalesStrategies } from "@/lib/services/sales-strategy-service"
 import { listOutreachDrafts } from "@/lib/services/outreach-draft-service"
-import type { Enums } from "@/lib/types/database.types"
+import { resolveRecipient, listSendAttempts } from "@/lib/services/outreach-send-service"
+import { getWhatsAppConfigStatus, getEmailConfigStatus } from "@/lib/outreach"
+import type { Enums, Tables } from "@/lib/types/database.types"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { ActivityFeed } from "@/components/dashboard/activity-feed"
 import { ResearchScoreActions } from "@/components/prospects/research-score-actions"
 import { StatusControl } from "@/components/prospects/status-control"
@@ -18,6 +21,7 @@ import { AddContactForm } from "@/components/prospects/add-contact-form"
 import { AddOpportunityForm } from "@/components/prospects/add-opportunity-form"
 import { GenerateOutreachAction } from "@/components/prospects/generate-outreach-action"
 import { OutreachDraftCard } from "@/components/prospects/outreach-draft-card"
+import { DoNotContactControl } from "@/components/prospects/do-not-contact-control"
 
 // Website audits chain up to 3 sequential AI calls (research + audit
 // extraction + opportunity analysis), and Generate Outreach chains up to
@@ -108,11 +112,38 @@ export default async function ProspectDetailPage({
   const business = await getBusinessById(supabase, id)
   if (!business) notFound()
 
-  const [activities, salesStrategies, outreachDrafts] = await Promise.all([
+  const [activities, salesStrategies, outreachDrafts, sendAttempts] = await Promise.all([
     listRecentActivities(supabase, 30, { entityType: "business", entityId: id }),
     listSalesStrategies(supabase, id),
     listOutreachDrafts(supabase, id),
+    listSendAttempts(supabase, id),
   ])
+
+  // Latest attempt per draft, for the per-draft sent/failed summary shown
+  // on each OutreachDraftCard - sendAttempts is already newest-first, so
+  // the first occurrence per draft is its latest attempt.
+  const latestAttemptByDraft = new Map<string, Tables<"outreach_send_attempts">>()
+  for (const attempt of sendAttempts) {
+    if (!latestAttemptByDraft.has(attempt.outreach_draft_id)) {
+      latestAttemptByDraft.set(attempt.outreach_draft_id, attempt)
+    }
+  }
+
+  // Mirrors resolveRecipient/getWhatsAppConfigStatus/getEmailConfigStatus
+  // exactly as the server-side send path uses them, so what the
+  // confirmation panel shows is never out of sync with what sending will
+  // actually check (the send action re-verifies all of this itself
+  // regardless - this is purely for an accurate preview).
+  function sendContextFor(draft: Tables<"outreach_drafts">) {
+    const contactForDraft = draft.contact_id ? (business!.contacts.find((c) => c.id === draft.contact_id) ?? null) : null
+    const recipient = resolveRecipient(draft.channel, contactForDraft, business!)
+    if (draft.channel === "WHATSAPP") {
+      const status = getWhatsAppConfigStatus()
+      return { recipient, providerConfigured: status.configured, senderIdentity: status.configured ? status.phoneNumberId : null }
+    }
+    const status = getEmailConfigStatus()
+    return { recipient, providerConfigured: status.configured, senderIdentity: status.configured ? status.fromEmail : null }
+  }
 
   const activeStrategy = salesStrategies.find((s) => s.status === "ACTIVE") ?? null
   const strategyOpportunity = activeStrategy
@@ -283,15 +314,83 @@ export default async function ProspectDetailPage({
           <CardDescription>Generated drafts for human review - nothing is ever sent automatically.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
+          <DoNotContactControl businessId={business.id} doNotContact={business.do_not_contact} reason={business.do_not_contact_reason} />
           <GenerateOutreachAction businessId={business.id} hasExisting={outreachDrafts.length > 0} />
           {outreachDrafts.length === 0 ? (
             <p className="text-sm text-muted-foreground">No outreach drafts yet.</p>
           ) : (
             <ul className="flex flex-col gap-4">
-              {outreachDrafts.map((draft) => (
-                <OutreachDraftCard key={`${draft.id}-${draft.updated_at}`} businessId={business.id} draft={draft} />
-              ))}
+              {outreachDrafts.map((draft) => {
+                const { recipient, providerConfigured, senderIdentity } = sendContextFor(draft)
+                return (
+                  <OutreachDraftCard
+                    key={`${draft.id}-${draft.updated_at}`}
+                    businessId={business.id}
+                    businessName={business.name}
+                    draft={draft}
+                    recipient={recipient}
+                    senderIdentity={senderIdentity}
+                    providerConfigured={providerConfigured}
+                    doNotContact={business.do_not_contact}
+                    latestSendAttempt={latestAttemptByDraft.get(draft.id) ?? null}
+                  />
+                )
+              })}
             </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Outreach history</CardTitle>
+          <CardDescription>Every send attempt for this business, successful or not - a permanent record, not just the latest.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {sendAttempts.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No send attempts yet.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Channel</TableHead>
+                  <TableHead>Recipient</TableHead>
+                  <TableHead>Message</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Provider</TableHead>
+                  <TableHead>Result</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sendAttempts.map((attempt) => (
+                  <TableRow key={attempt.id}>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {new Date(attempt.attempted_at).toLocaleString()}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{attempt.channel}</Badge>
+                    </TableCell>
+                    <TableCell>{attempt.recipient_address}</TableCell>
+                    <TableCell className="max-w-64 truncate" title={attempt.message_body}>
+                      {attempt.message_subject ? `${attempt.message_subject} - ` : ""}
+                      {attempt.message_body}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={attempt.status === "SENT" ? "success" : attempt.status === "FAILED" ? "destructive" : "warning"}
+                      >
+                        {attempt.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{attempt.provider}</TableCell>
+                    <TableCell className="max-w-64 truncate text-muted-foreground" title={attempt.error_message ?? attempt.provider_message_id ?? ""}>
+                      {attempt.status === "SENT" ? attempt.provider_message_id : attempt.error_message}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>

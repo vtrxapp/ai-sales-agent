@@ -32,6 +32,9 @@ function business(overrides: Partial<Tables<"businesses">> = {}): Tables<"busine
     source: "manual",
     source_url: null,
     discovered_at: new Date().toISOString(),
+    do_not_contact: false,
+    do_not_contact_reason: null,
+    do_not_contact_at: null,
     last_researched_at: null,
     created_by: null,
     created_at: new Date().toISOString(),
@@ -420,5 +423,29 @@ describe("editOutreachDraft / approveOutreachDraft / rejectOutreachDraft", () =>
     const updated = await rejectOutreachDraft(client, "draft-1", "user-1")
 
     expect(updated.status).toBe("CANCELLED")
+  })
+
+  it("approve refuses a draft that is already READY_TO_SEND, SENDING, SENT, or CANCELLED", async () => {
+    for (const status of ["READY_TO_SEND", "SENDING", "SENT", "CANCELLED"] as const) {
+      const { client, store } = seedWithDraft({ status })
+      await expect(approveOutreachDraft(client, "draft-1", "user-1")).rejects.toThrow(/cannot be approved/i)
+      expect(store.outreach_drafts[0].status).toBe(status)
+    }
+  })
+
+  it("edit refuses to change a SENT or SENDING message - its content is permanent history", async () => {
+    for (const status of ["SENT", "SENDING"] as const) {
+      const { client, store } = seedWithDraft({ status })
+      await expect(editOutreachDraft(client, "draft-1", { body: "changed" }, "user-1")).rejects.toThrow(/already/i)
+      expect(store.outreach_drafts[0].body).not.toBe("changed")
+    }
+  })
+
+  it("reject refuses to cancel a SENT or SENDING message", async () => {
+    for (const status of ["SENT", "SENDING"] as const) {
+      const { client, store } = seedWithDraft({ status })
+      await expect(rejectOutreachDraft(client, "draft-1", "user-1")).rejects.toThrow(/already/i)
+      expect(store.outreach_drafts[0].status).toBe(status)
+    }
   })
 })

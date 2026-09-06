@@ -459,3 +459,60 @@ export async function updateBusinessStatus(
 
   return business
 }
+
+// Suppression is business-level, not per-contact (spec section 29-30) -
+// the safer default, since it blocks every send to that business
+// regardless of which contact a future draft targets. Enforced
+// server-side inside sendOutreachMessage, never only in the UI.
+export async function setDoNotContact(
+  supabase: SupabaseClient<Database>,
+  businessId: string,
+  reason: string | null,
+  actorId: string
+): Promise<Tables<"businesses">> {
+  const { data: business, error } = await supabase
+    .from("businesses")
+    .update({ do_not_contact: true, do_not_contact_reason: reason, do_not_contact_at: new Date().toISOString() })
+    .eq("id", businessId)
+    .select()
+    .single()
+  if (error) throw new Error(`Failed to mark business Do Not Contact: ${error.message}`)
+
+  await logActivity(supabase, {
+    entityType: "business",
+    entityId: businessId,
+    activityType: "DO_NOT_CONTACT_SET",
+    description: `"${business.name}" marked Do Not Contact${reason ? `: ${reason}` : "."}`,
+    productId: null,
+    actorId,
+    metadata: { reason },
+  })
+
+  return business
+}
+
+export async function clearDoNotContact(
+  supabase: SupabaseClient<Database>,
+  businessId: string,
+  actorId: string
+): Promise<Tables<"businesses">> {
+  const { data: business, error } = await supabase
+    .from("businesses")
+    .update({ do_not_contact: false, do_not_contact_reason: null, do_not_contact_at: null })
+    .eq("id", businessId)
+    .select()
+    .single()
+  if (error) throw new Error(`Failed to clear Do Not Contact: ${error.message}`)
+
+  await logActivity(supabase, {
+    entityType: "business",
+    entityId: businessId,
+    activityType: "DO_NOT_CONTACT_CLEARED",
+    description: `"${business.name}" is no longer marked Do Not Contact.`,
+    productId: null,
+    actorId,
+    metadata: {},
+  })
+
+  return business
+}

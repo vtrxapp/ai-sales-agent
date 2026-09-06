@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { summarizeCampaigns, summarizePipeline } from "./analytics-service"
+import { summarizeCampaigns, summarizePipeline, summarizeSendAttempts } from "./analytics-service"
 
 describe("summarizeCampaigns", () => {
   it("returns all zeros for no campaigns", () => {
@@ -75,5 +75,52 @@ describe("summarizePipeline", () => {
     ])
 
     expect(result.highValueUncontactedCount).toBe(2)
+  })
+})
+
+describe("summarizeSendAttempts", () => {
+  it("returns null success rate and all-zero counts with no attempts", () => {
+    const result = summarizeSendAttempts([], new Map())
+    expect(result).toEqual({
+      messagesSentByChannel: { WHATSAPP: 0, EMAIL: 0 },
+      sendFailures: 0,
+      sendSuccessRate: null,
+      sentByIndustry: {},
+    })
+  })
+
+  it("counts sent messages by channel and failures separately, ignoring PENDING", () => {
+    const result = summarizeSendAttempts(
+      [
+        { status: "SENT", channel: "WHATSAPP", business_id: "biz-1" },
+        { status: "SENT", channel: "WHATSAPP", business_id: "biz-1" },
+        { status: "SENT", channel: "EMAIL", business_id: "biz-2" },
+        { status: "FAILED", channel: "WHATSAPP", business_id: "biz-1" },
+        { status: "PENDING", channel: "EMAIL", business_id: "biz-2" },
+      ],
+      new Map()
+    )
+
+    expect(result.messagesSentByChannel).toEqual({ WHATSAPP: 2, EMAIL: 1 })
+    expect(result.sendFailures).toBe(1)
+    // 3 sent / 4 completed (sent+failed) - the PENDING row doesn't count as completed.
+    expect(result.sendSuccessRate).toBe(75)
+  })
+
+  it("groups sent messages by industry, falling back to Unknown when not on file", () => {
+    const result = summarizeSendAttempts(
+      [
+        { status: "SENT", channel: "WHATSAPP", business_id: "biz-1" },
+        { status: "SENT", channel: "EMAIL", business_id: "biz-2" },
+        { status: "SENT", channel: "WHATSAPP", business_id: "biz-3" },
+      ],
+      new Map([
+        ["biz-1", "Fitness"],
+        ["biz-2", "Fitness"],
+        ["biz-3", null],
+      ])
+    )
+
+    expect(result.sentByIndustry).toEqual({ Fitness: 2, Unknown: 1 })
   })
 })

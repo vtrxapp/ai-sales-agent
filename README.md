@@ -15,14 +15,17 @@ Full background, architecture decisions, and the phase-by-phase build plan
 are in [`PROJECT_AUDIT.md`](./PROJECT_AUDIT.md). This README is the
 practical "how do I run/deploy/test this" guide.
 
-**Current status: Phase 4 (Outreach Intelligence Engine).** Auth, the app
-shell, products, campaigns, lead discovery, the business/prospect
+**Current status: Phase 5 (Actual Outreach Infrastructure).** Auth, the
+app shell, products, campaigns, lead discovery, the business/prospect
 database, lead scoring, website audits, the full opportunity engine,
-the sales pipeline, and now sales strategy generation + WhatsApp/email
-outreach *drafting* (never sending) are functional. Proposals,
-audiences, signatures, analytics, and the AI assistant are real pages
-with honest "coming in Phase N" placeholders — see the sidebar. Actual
-message sending is Phase 5, not yet built.
+the sales pipeline, sales strategy generation, WhatsApp/email outreach
+drafting, and now **actual sending** — via the official WhatsApp
+Business Platform (Meta Cloud API) and Resend — are functional, always
+behind an explicit human confirmation. Proposals, audiences,
+signatures, analytics, and the AI assistant are real pages with honest
+"coming in Phase N" placeholders — see the sidebar. AI replies,
+automated follow-ups, and mass sending are explicitly out of scope for
+this phase (and the next).
 
 ## Architecture at a glance
 
@@ -67,8 +70,12 @@ components/
 lib/
   ai/                  AIProvider interface + Anthropic adapter (lib/ai/index.ts
                        is the factory - throws a typed error if unconfigured)
-  outreach/            OutreachProvider interface only (Phase 5 will implement
-                       WhatsApp/email sending against it) - no sending code here
+  outreach/            OutreachProvider interface + the concrete
+                       WhatsAppCloudApiProvider (Meta Cloud API) and
+                       ResendEmailProvider, a config-driven factory
+                       (index.ts) that throws a typed *NotConfiguredError
+                       when credentials are missing, and test-only mock
+                       providers (never wired into the factory)
   supabase/            Browser/server/admin Supabase clients + proxy session helper
   services/            Business logic (BusinessService, ContactService,
                        LeadResearchService, LeadScoringService,
@@ -76,6 +83,9 @@ lib/
                        OpportunityService (dedup + scoring),
                        NextActionService (pure decision tree),
                        SalesStrategyService, OutreachDraftService,
+                       OutreachSendService (the send/retry state
+                       machine + idempotency), phone-normalization (pure,
+                       WhatsApp-API-ready number formatting),
                        opportunity/contact/channel-selection (pure,
                        deterministic), message-quality (validation +
                        personalization scoring, pure), DeduplicationService,
@@ -153,16 +163,65 @@ What it's used for:
   fails validation is marked `NEEDS_REVIEW` and cannot be approved until
   edited (which always re-validates) or regenerated.
 
-None of this ever sends anything — no WhatsApp, email, or SMS, and no
-automatic contact of any business. Approving a draft only sets its status
-to `READY_TO_SEND`; nothing is dispatched, and the prospect's pipeline
-status is never changed automatically. The prospect page's "Next
-recommended action" is a deterministic recommendation (a pure decision
-tree in `lib/services/next-action-service.ts`, not an AI call) for a
-human to act on manually.
+None of this ever sends anything on its own — no WhatsApp, email, or SMS,
+and no automatic contact of any business. Approving a draft only sets its
+status to `READY_TO_SEND`; a *separate* explicit Send action (with its own
+confirmation step) is what actually dispatches a message - see "Sending
+setup" below - and the prospect's pipeline status is never changed
+automatically either way. The prospect page's "Next recommended action"
+is a deterministic recommendation (a pure decision tree in
+`lib/services/next-action-service.ts`, not an AI call) for a human to act
+on manually.
 
 The model defaults to `claude-opus-5`; override with `ANTHROPIC_MODEL` if
 you want a different cost/quality tradeoff.
+
+## Sending setup
+
+Actually sending a message (as opposed to drafting one) needs its own
+provider credentials, entirely separate from `ANTHROPIC_API_KEY`. Without
+them, Send shows a clear configuration error naming exactly what's
+missing - it never fakes a successful send. Check current status any
+time at `/outreach` (configured/not, sender identity, no secrets shown).
+
+### WhatsApp (official WhatsApp Business Platform / Meta Cloud API)
+
+This app only ever calls the official Cloud API - never WhatsApp Web
+automation, browser control, or an unofficial library.
+
+1. Create a Meta app with the WhatsApp product added, a test or
+   production WhatsApp Business phone number, and a **System User**
+   access token (recommended for production - it doesn't expire the way
+   a temporary token does) with the `whatsapp_business_messaging` and
+   `whatsapp_business_management` permissions. See
+   [Meta's WhatsApp Cloud API documentation](https://developers.facebook.com/docs/whatsapp/cloud-api)
+   for current steps - verify against the live docs before assuming
+   anything here is still accurate, since Meta revises this fairly
+   often.
+2. **Create and get approval for a message template** in Meta Business
+   Manager. This is not optional: a business can only send free-form
+   text to someone who has messaged it within the last 24 hours: cold/
+   business-initiated outreach - this app's only use case - requires a
+   pre-approved template. One generic template with a single body
+   variable (the approved draft text is passed as that variable) is
+   enough; no code change is needed once it exists and is approved.
+3. Set `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`,
+   `WHATSAPP_TEMPLATE_NAME`, and `WHATSAPP_TEMPLATE_LANGUAGE` (e.g. `en`)
+   in `.env.local` (and in Vercel for deployment). Leave
+   `WHATSAPP_API_VERSION` unset unless you need to override the version
+   pinned in `lib/outreach/whatsapp-provider.ts`.
+
+### Email (Resend)
+
+1. Create a [Resend](https://resend.com) account, verify a sending
+   domain, and create an API key.
+2. Set `RESEND_API_KEY` and `RESEND_FROM_EMAIL` (an address on your
+   verified domain) in `.env.local`. `RESEND_FROM_NAME` is optional.
+
+Swapping either provider for a different one (e.g. SendGrid/SES instead
+of Resend) means writing a new class implementing `OutreachProvider` in
+`lib/outreach/` - no changes needed anywhere that calls
+`sendOutreachMessage`.
 
 ## Setup
 
@@ -209,9 +268,12 @@ NEXT_PUBLIC_SUPABASE_URL=https://<your-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-or-publishable-key>
 ```
 
-`SUPABASE_SERVICE_ROLE_KEY` and `ANTHROPIC_API_KEY` are placeholders for
-Phase 2+ — leave them blank for now. **Never** commit `.env.local` or put
-real secrets in `.env.example`.
+`SUPABASE_SERVICE_ROLE_KEY` is a placeholder, not used yet — leave it
+blank. `ANTHROPIC_API_KEY` (drafting) and the `WHATSAPP_*`/`RESEND_*`
+variables (actual sending — see "Sending setup" above) can also be left
+blank to run the rest of the app; each missing group disables only its
+own feature with a clear message, never a silent failure. **Never**
+commit `.env.local` or put real secrets in `.env.example`.
 
 ### 5. Create your first user
 
@@ -256,9 +318,21 @@ dedup matching, the audit-weighting math, the next-action decision tree,
 opportunity/contact/channel selection, message validation and
 personalization scoring, the draft lifecycle) with mocked inputs and a
 fake Supabase client, since this environment has no `ANTHROPIC_API_KEY`
-configured to make a real call against. If you have a key, exercising
-`/leads` → Research → Score → Audit Website → Generate Outreach once by
-hand is worth doing after pulling this branch — in particular:
+configured to make a real call against. The same is true of the sending
+path: `outreach-send-service.test.ts` exercises the full state machine
+(authorization, suppression, idempotency/concurrency, retries) against a
+fake Supabase client with a mocked provider factory, and
+`whatsapp-provider.test.ts`/`email-provider.test.ts` exercise the real
+`WhatsAppCloudApiProvider`/`ResendEmailProvider` classes (request shape,
+response parsing, error classification) against a mocked `fetch` — no
+real WhatsApp/Resend credentials needed to run any of this. A Vitest
+module needing the bare `server-only` import to resolve (any real
+provider adapter) is satisfied via the `server-only` alias in
+`vitest.config.mts` pointing at `lib/testing/server-only-stub.ts` — see
+the comment there for why Vitest needs this and Next's own build doesn't.
+If you have real credentials, exercising `/leads` → Research → Score →
+Audit Website → Generate Outreach → approve a draft → Send once by hand
+is worth doing after pulling this branch — in particular:
 - re-running Research or Audit Website on the same business a second time
   to confirm opportunities update in place (`times_detected` increments)
   instead of duplicating;
@@ -289,6 +363,25 @@ hand is worth doing after pulling this branch — in particular:
 - `proxy.ts` (Next.js 16's renamed `middleware.ts`) does an *optimistic*
   auth check on every request; the real check happens server-side via
   `lib/dal.ts` and RLS, per Next.js's recommended Data Access Layer pattern.
+- **Sending (Phase 5)**: `WHATSAPP_ACCESS_TOKEN`/`RESEND_API_KEY` are read
+  only inside `server-only`-guarded modules under `lib/outreach/` and
+  never appear in client bundles, database rows, activity metadata, or
+  logs — provider errors are translated into fixed, friendly messages
+  (see `classifyWhatsAppError`/`classifyResendError`) rather than
+  surfacing the provider's raw response. A send is only ever triggered
+  by a server action that re-verifies everything itself from the
+  database — the draft's approval status, validation status, business
+  suppression (`do_not_contact`), and the recipient address — never
+  trusting client-supplied values for any of it (see the "Never accept
+  the entire message/recipient as trusted client-provided values" style
+  comments in `lib/services/outreach-send-service.ts`). Idempotency is
+  enforced at the database level two ways: an optimistic
+  `READY_TO_SEND → SENDING` status transition guarded by
+  `.eq("status", ...)` (Postgres serializes concurrent updates to the
+  same row, so only one concurrent request can ever win it), and a
+  unique partial index (`outreach_send_attempts_one_pending_per_draft`)
+  allowing at most one `PENDING` attempt per draft — not just a disabled
+  button in the UI.
 
 ## Troubleshooting
 
@@ -300,6 +393,64 @@ hand is worth doing after pulling this branch — in particular:
 - **New user can't see any data**: RLS requires an authenticated session;
   confirm the user was created via the Dashboard (not some other path) and
   that `public.profiles` has a matching row.
+
+## Known limitations (Phase 5)
+
+- **No live WhatsApp or email credentials were available in the build
+  environment**, so no real message was actually sent during this
+  phase — see the Phase 5 report for exactly what was and wasn't
+  verified live versus via mocked unit tests, and "Sending setup" above
+  for how to configure real credentials.
+- **A confirmed browser session could not be created in this sandbox**
+  to click through the new Send UI live end-to-end: there's no way to
+  receive a magic-link email here, and a directly-inserted `auth.users`
+  row (the standard local-seed pattern, bcrypt hash and all) was
+  rejected by Supabase Cloud's hosted Auth with "Incorrect email or
+  password" for a reason not diagnosable without deeper access to that
+  project's Auth configuration. The UI was verified by careful code
+  review plus the full Vitest suite instead — see the Phase 5 report.
+  If you have real login credentials for this project, a manual
+  click-through of Approve → Send → confirm → history is worth doing.
+- **Delivery/read tracking isn't implemented.** A successful send only
+  ever records `SENT` (the provider accepted the request) - never
+  `DELIVERED`/`READ`/`OPENED`, which would need inbound webhook
+  infrastructure this phase deliberately doesn't build (spec: no
+  inbound webhooks this phase). `SENT` means "handed to the provider,"
+  not "the recipient saw it."
+- **Suppression (Do Not Contact) is business-level, not per-contact.**
+  The safer default (blocks every channel/contact for that business),
+  and this app has no standalone contact detail page to hang
+  per-contact suppression UI off yet.
+- **No automatic reconciliation for a send stuck mid-flight.** If the
+  server process crashes between the provider confirming a send and
+  this app recording that outcome, the draft can be left in `SENDING`
+  with no way to tell — from inside the app — whether the message
+  actually went out. This is a known gap of not having a distributed
+  transaction across an external HTTP call and a database write; a
+  real occurrence would need checking the provider's own message log
+  and fixing the row by hand. Genuinely rare in practice (it requires a
+  crash in a very small window), not something this phase's scope
+  covers building automated recovery for.
+- **Phone normalization covers Zimbabwe only** (the only country this
+  app currently has verified users in) via a per-country config
+  (`lib/services/phone-normalization.ts`); adding another country is a
+  new `CountryPhoneConfig` entry, not a rewrite - but a genuinely
+  ambiguous number that matches more than one configured country's
+  shape isn't resolvable by this phase's simple single-pass matcher.
+- **WhatsApp Cloud API details were verified via web research this
+  session, not by fetching Meta's own docs directly** —
+  `developers.facebook.com` is blocked from this sandbox's network, so
+  the endpoint shape, template requirement, and error codes were
+  cross-checked across several independent third-party sources instead
+  of read directly from Meta. Re-verify against
+  [developers.facebook.com/docs/whatsapp](https://developers.facebook.com/docs/whatsapp/cloud-api)
+  before relying on this in production, since Meta revises these APIs
+  periodically.
+- **Analytics' "by industry" breakdown covers sent messages only**, not
+  the "by opportunity type" cut the spec also mentions — that needs an
+  extra join through drafts→opportunities this phase didn't add, to
+  keep the dashboard query simple; a reasonable follow-up, not a gap in
+  what actually gets sent or recorded.
 
 ## Known limitations (Phase 4)
 
@@ -372,11 +523,13 @@ hand is worth doing after pulling this branch — in particular:
 
 ## Roadmap
 
-Phase 5 is actual outreach sending (WhatsApp Business Platform + an email
-provider, against the `OutreachProvider` interface prepared in this
-phase) - per this phase's explicit instructions. Note this differs from
-`PROJECT_AUDIT.md`'s original Phase 0 plan, where Phase 5 was Dating App
-Growth; see the Phase 4 report for this discrepancy. Beyond sending, see
-`PROJECT_AUDIT.md` for the rest of the phase plan (Dating App Growth,
-Signatures, Marketing Intelligence, AI Growth Advisor, Automation,
-Production Hardening).
+Phase 5 (this phase) added actual outreach sending — WhatsApp Business
+Platform + Resend, against the `OutreachProvider` interface prepared in
+Phase 4 — per this phase's explicit instructions. Recommended next
+(per the Phase 5 report): reply/response tracking and a lightweight CRM
+follow-up workflow, still with no AI-driven auto-replies or negotiation.
+Note this differs from `PROJECT_AUDIT.md`'s original Phase 0 plan, where
+Phase 5 was Dating App Growth; see the Phase 4 report for this
+discrepancy. Beyond sending, see `PROJECT_AUDIT.md` for the rest of the
+phase plan (Dating App Growth, Signatures, Marketing Intelligence, AI
+Growth Advisor, Automation, Production Hardening).

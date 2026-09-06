@@ -251,6 +251,12 @@ export async function editOutreachDraft(
   const { data: existing, error: fetchError } = await supabase.from("outreach_drafts").select("*").eq("id", draftId).single()
   if (fetchError) throw new Error(`Draft not found: ${fetchError.message}`)
 
+  if (existing.status === "SENT" || existing.status === "SENDING") {
+    throw new Error(
+      `This message has already ${existing.status === "SENT" ? "been sent" : "started sending"} and can no longer be edited - its content is part of the permanent send history.`
+    )
+  }
+
   const subject = input.subject ?? null
   const qualityContext = await buildQualityContextForDraft(supabase, existing, { subject, body: input.body })
   const validation = validateMessage(qualityContext)
@@ -304,6 +310,10 @@ export async function approveOutreachDraft(
   const { data: existing, error: fetchError } = await supabase.from("outreach_drafts").select("*").eq("id", draftId).single()
   if (fetchError) throw new Error(`Draft not found: ${fetchError.message}`)
 
+  if (existing.status !== "DRAFT" && existing.status !== "NEEDS_REVIEW") {
+    throw new Error(`This draft cannot be approved from its current status (${existing.status}).`)
+  }
+
   if (existing.validation_status === "FAILED") {
     throw new Error(
       "This draft fails validation and cannot be approved yet - edit it to resolve the issues shown, or regenerate it."
@@ -314,6 +324,7 @@ export async function approveOutreachDraft(
     .from("outreach_drafts")
     .update({ status: "READY_TO_SEND", approved_at: new Date().toISOString(), approved_by: actorId })
     .eq("id", draftId)
+    .eq("status", existing.status)
     .select()
     .single()
   if (error) throw new Error(`Failed to approve outreach draft: ${error.message}`)
@@ -336,6 +347,15 @@ export async function rejectOutreachDraft(
   draftId: string,
   actorId: string
 ): Promise<Tables<"outreach_drafts">> {
+  const { data: existing, error: fetchError } = await supabase.from("outreach_drafts").select("*").eq("id", draftId).single()
+  if (fetchError) throw new Error(`Draft not found: ${fetchError.message}`)
+
+  if (existing.status === "SENT" || existing.status === "SENDING") {
+    throw new Error(
+      `This message has already ${existing.status === "SENT" ? "been sent" : "started sending"} and can no longer be rejected.`
+    )
+  }
+
   const { data: updated, error } = await supabase
     .from("outreach_drafts")
     .update({ status: "CANCELLED" })

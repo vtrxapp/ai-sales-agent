@@ -1,6 +1,7 @@
 // Generated from the live Supabase schema (project kivqnyguyjqvoeypeqol) via
 // the Supabase MCP `generate_typescript_types` tool. Do not hand-edit -
 // regenerate after every migration instead.
+
 export type Json =
   | string
   | number
@@ -143,6 +144,9 @@ export type Database = {
           created_by: string | null
           description: string | null
           discovered_at: string
+          do_not_contact: boolean
+          do_not_contact_at: string | null
+          do_not_contact_reason: string | null
           email: string | null
           id: string
           industry: string | null
@@ -169,6 +173,9 @@ export type Database = {
           created_by?: string | null
           description?: string | null
           discovered_at?: string
+          do_not_contact?: boolean
+          do_not_contact_at?: string | null
+          do_not_contact_reason?: string | null
           email?: string | null
           id?: string
           industry?: string | null
@@ -195,6 +202,9 @@ export type Database = {
           created_by?: string | null
           description?: string | null
           discovered_at?: string
+          do_not_contact?: boolean
+          do_not_contact_at?: string | null
+          do_not_contact_reason?: string | null
           email?: string | null
           id?: string
           industry?: string | null
@@ -688,6 +698,107 @@ export type Database = {
           },
         ]
       }
+      outreach_send_attempts: {
+        Row: {
+          attempted_at: string
+          business_id: string
+          channel: Database["public"]["Enums"]["outreach_channel"]
+          completed_at: string | null
+          contact_id: string | null
+          created_at: string
+          created_by: string | null
+          error_code: string | null
+          error_message: string | null
+          id: string
+          message_body: string
+          message_subject: string | null
+          metadata: Json
+          outreach_draft_id: string
+          provider: string
+          provider_message_id: string | null
+          recipient_address: string
+          retryable: boolean | null
+          sender_identity: string
+          status: Database["public"]["Enums"]["send_attempt_status"]
+          updated_at: string
+        }
+        Insert: {
+          attempted_at?: string
+          business_id: string
+          channel: Database["public"]["Enums"]["outreach_channel"]
+          completed_at?: string | null
+          contact_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          message_body: string
+          message_subject?: string | null
+          metadata?: Json
+          outreach_draft_id: string
+          provider: string
+          provider_message_id?: string | null
+          recipient_address: string
+          retryable?: boolean | null
+          sender_identity: string
+          status?: Database["public"]["Enums"]["send_attempt_status"]
+          updated_at?: string
+        }
+        Update: {
+          attempted_at?: string
+          business_id?: string
+          channel?: Database["public"]["Enums"]["outreach_channel"]
+          completed_at?: string | null
+          contact_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          message_body?: string
+          message_subject?: string | null
+          metadata?: Json
+          outreach_draft_id?: string
+          provider?: string
+          provider_message_id?: string | null
+          recipient_address?: string
+          retryable?: boolean | null
+          sender_identity?: string
+          status?: Database["public"]["Enums"]["send_attempt_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "outreach_send_attempts_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outreach_send_attempts_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outreach_send_attempts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outreach_send_attempts_outreach_draft_id_fkey"
+            columns: ["outreach_draft_id"]
+            isOneToOne: false
+            referencedRelation: "outreach_drafts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       products: {
         Row: {
           active: boolean
@@ -1036,6 +1147,8 @@ export type Database = {
         | "READY_TO_SEND"
         | "SENT"
         | "CANCELLED"
+        | "SENDING"
+        | "FAILED"
       outreach_message_type: "INITIAL_OUTREACH"
       outreach_variant: "RECOMMENDED" | "DIRECT" | "CONVERSATIONAL"
       pipeline_status:
@@ -1050,6 +1163,7 @@ export type Database = {
       product_type: "ZVIKO_LABS" | "DATING_APP"
       recommended_channel: "WHATSAPP" | "EMAIL" | "NONE"
       sales_strategy_status: "ACTIVE" | "SUPERSEDED"
+      send_attempt_status: "PENDING" | "SENT" | "FAILED"
       validation_status: "PASSED" | "FAILED"
       whatsapp_status: "AVAILABLE" | "NOT_AVAILABLE" | "UNKNOWN"
     }
@@ -1241,6 +1355,8 @@ export const Constants = {
         "READY_TO_SEND",
         "SENT",
         "CANCELLED",
+        "SENDING",
+        "FAILED",
       ],
       outreach_message_type: ["INITIAL_OUTREACH"],
       outreach_variant: ["RECOMMENDED", "DIRECT", "CONVERSATIONAL"],
@@ -1257,6 +1373,7 @@ export const Constants = {
       product_type: ["ZVIKO_LABS", "DATING_APP"],
       recommended_channel: ["WHATSAPP", "EMAIL", "NONE"],
       sales_strategy_status: ["ACTIVE", "SUPERSEDED"],
+      send_attempt_status: ["PENDING", "SENT", "FAILED"],
       validation_status: ["PASSED", "FAILED"],
       whatsapp_status: ["AVAILABLE", "NOT_AVAILABLE", "UNKNOWN"],
     },
