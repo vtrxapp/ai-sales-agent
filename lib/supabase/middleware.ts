@@ -4,7 +4,15 @@ import { NextResponse, type NextRequest } from "next/server"
 // Public routes that don't require an authenticated session. Everything
 // else in the app is internal-only per the Growth Engine spec: no public
 // signup, no anonymous access to leads/campaigns/analytics data.
-const PUBLIC_ROUTES = ["/login", "/auth/callback"]
+//
+// /api/webhooks is deliberately included: Meta and Resend call these
+// endpoints directly with no Supabase session cookie at all, so gating
+// them behind Supabase auth would break every inbound delivery. They are
+// NOT unauthenticated in the security sense - each one verifies the
+// caller's own provider-specific signature inside the route handler
+// (WhatsApp's X-Hub-Signature-256, Resend's Standard Webhooks signature)
+// before trusting anything in the body. See lib/inbound/.
+const PUBLIC_ROUTES = ["/login", "/auth/callback", "/api/webhooks"]
 
 function isPublicRoute(pathname: string) {
   return PUBLIC_ROUTES.some((route) => pathname.startsWith(route))

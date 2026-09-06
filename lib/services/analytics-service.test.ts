@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { summarizeCampaigns, summarizePipeline, summarizeSendAttempts } from "./analytics-service"
+import { summarizeCampaigns, summarizePipeline, summarizeSendAttempts, summarizeResponseRates } from "./analytics-service"
 
 describe("summarizeCampaigns", () => {
   it("returns all zeros for no campaigns", () => {
@@ -122,5 +122,68 @@ describe("summarizeSendAttempts", () => {
     )
 
     expect(result.sentByIndustry).toEqual({ Fitness: 2, Unknown: 1 })
+  })
+})
+
+describe("summarizeResponseRates", () => {
+  it("returns null rates with no sends yet", () => {
+    const result = summarizeResponseRates([], [])
+    expect(result.responseRate).toBeNull()
+    expect(result.uniqueContactedCount).toBe(0)
+    expect(result.uniqueRespondedCount).toBe(0)
+  })
+
+  it("never counts a prospect's several replies as several responding leads", () => {
+    const result = summarizeResponseRates(
+      [
+        { business_id: "biz-1", channel: "WHATSAPP" },
+        { business_id: "biz-2", channel: "WHATSAPP" },
+      ],
+      [
+        { business_id: "biz-1", channel: "WHATSAPP", intent: "QUESTION" },
+        { business_id: "biz-1", channel: "WHATSAPP", intent: "INTERESTED" },
+        { business_id: "biz-1", channel: "WHATSAPP", intent: "REQUEST_FOR_PRICING" },
+      ]
+    )
+
+    // 3 messages from the same business -> still exactly 1 responding lead.
+    expect(result.uniqueRespondedCount).toBe(1)
+    expect(result.responseRate).toBe(50)
+  })
+
+  it("computes per-channel response rates independently", () => {
+    const result = summarizeResponseRates(
+      [
+        { business_id: "biz-1", channel: "WHATSAPP" },
+        { business_id: "biz-2", channel: "EMAIL" },
+      ],
+      [{ business_id: "biz-1", channel: "WHATSAPP", intent: "INTERESTED" }]
+    )
+
+    expect(result.whatsappResponseRate).toBe(100)
+    expect(result.emailResponseRate).toBe(0)
+  })
+
+  it("computes intent-breakdown rates over classified responses, ignoring unclassified ones", () => {
+    const result = summarizeResponseRates(
+      [{ business_id: "biz-1", channel: "WHATSAPP" }],
+      [
+        { business_id: "biz-1", channel: "WHATSAPP", intent: "REQUEST_FOR_MEETING" },
+        { business_id: "biz-1", channel: "WHATSAPP", intent: "OBJECTION" },
+        { business_id: "biz-1", channel: "WHATSAPP", intent: null },
+      ]
+    )
+
+    // 2 classified responses (the null-intent one is excluded from the denominator).
+    expect(result.meetingRequestRate).toBe(50)
+    expect(result.objectionRate).toBe(50)
+  })
+
+  it("counts an OPT_OUT-classified response toward the opt-out rate", () => {
+    const result = summarizeResponseRates(
+      [{ business_id: "biz-1", channel: "WHATSAPP" }],
+      [{ business_id: "biz-1", channel: "WHATSAPP", intent: "OPT_OUT" }]
+    )
+    expect(result.optOutRate).toBe(100)
   })
 })

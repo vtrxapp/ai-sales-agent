@@ -14,6 +14,7 @@ export type NextAction =
   | "ADD_CONTACT"
   | "PREPARE_OUTREACH"
   | "FOLLOW_UP"
+  | "RESPOND_TO_PROSPECT"
   | "SCHEDULE_MEETING"
   | "SEND_PROPOSAL"
   | "NO_ACTION"
@@ -35,6 +36,8 @@ export type NextActionInput = {
     title: string
     priority: Enums<"opportunity_priority">
   } | null
+  /** A conversation is waiting on a human reply (spec section 15/17) - takes priority over the data-gathering pipeline. */
+  needsResponse: boolean
 }
 
 // Pure decision tree, not an AI call - deterministic and unit-testable so
@@ -47,6 +50,12 @@ export function determineNextAction(input: NextActionInput): NextActionRecommend
     return {
       action: "NO_ACTION",
       reason: `This prospect is already ${input.pipelineStatus.toLowerCase()} - no further action recommended.`,
+    }
+  }
+  if (input.needsResponse) {
+    return {
+      action: "RESPOND_TO_PROSPECT",
+      reason: "This prospect replied and is waiting on a response - review the conversation before anything else.",
     }
   }
   if (!input.hasResearch) {
@@ -108,7 +117,11 @@ export function determineNextAction(input: NextActionInput): NextActionRecommend
 // Adapter from the aggregate BusinessDetail shape to the decision tree's
 // flat input - keeps determineNextAction itself free of any dependency on
 // how the data is fetched, so it stays trivially unit-testable.
-export function getNextAction(business: BusinessDetail): NextActionRecommendation {
+// needsResponse comes from the caller (conversations aren't part of
+// BusinessDetail) rather than being fetched in here - defaults to false
+// so existing callers/tests that don't know about conversations yet are
+// unaffected.
+export function getNextAction(business: BusinessDetail, needsResponse = false): NextActionRecommendation {
   const topOpportunity =
     business.opportunities
       .filter((o) => o.status === "IDENTIFIED" && (o.priority === "CRITICAL" || o.priority === "HIGH"))
@@ -121,6 +134,7 @@ export function getNextAction(business: BusinessDetail): NextActionRecommendatio
     hasAudit: business.audits.length > 0,
     hasLeadScore: business.lead_score !== null,
     hasContact: business.contacts.length > 0,
+    needsResponse,
     hasQualifiedOpportunity: business.opportunities.some((o) => o.status === "QUALIFIED" || o.status === "ACCEPTED"),
     topOpportunity: topOpportunity ? { title: topOpportunity.title, priority: topOpportunity.priority } : null,
   })

@@ -14,6 +14,7 @@ function input(overrides: Partial<NextActionInput> = {}): NextActionInput {
     hasContact: true,
     hasQualifiedOpportunity: false,
     topOpportunity: null,
+    needsResponse: false,
     ...overrides,
   }
 }
@@ -29,6 +30,14 @@ describe("determineNextAction", () => {
 
   it("recommends RESEARCH_BUSINESS when no research has been recorded, ahead of every other gap", () => {
     expect(determineNextAction(input({ hasResearch: false, hasLeadScore: false })).action).toBe("RESEARCH_BUSINESS")
+  })
+
+  it("recommends RESPOND_TO_PROSPECT when a conversation needs a response, ahead of everything except WON/LOST", () => {
+    expect(determineNextAction(input({ needsResponse: true, hasResearch: false })).action).toBe("RESPOND_TO_PROSPECT")
+  })
+
+  it("does not recommend RESPOND_TO_PROSPECT once the prospect is WON or LOST", () => {
+    expect(determineNextAction(input({ needsResponse: true, pipelineStatus: "WON" })).action).toBe("NO_ACTION")
   })
 
   it("recommends AUDIT_WEBSITE when a website exists but has never been audited", () => {

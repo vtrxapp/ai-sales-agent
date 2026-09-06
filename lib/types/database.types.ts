@@ -369,6 +369,190 @@ export type Database = {
           },
         ]
       }
+      conversations: {
+        Row: {
+          business_id: string
+          channel: Database["public"]["Enums"]["outreach_channel"]
+          contact_id: string | null
+          created_at: string
+          external_conversation_id: string | null
+          id: string
+          last_inbound_at: string | null
+          last_message_at: string | null
+          last_outbound_at: string | null
+          provider: string
+          status: Database["public"]["Enums"]["conversation_status"]
+          unread_count: number
+          updated_at: string
+        }
+        Insert: {
+          business_id: string
+          channel: Database["public"]["Enums"]["outreach_channel"]
+          contact_id?: string | null
+          created_at?: string
+          external_conversation_id?: string | null
+          id?: string
+          last_inbound_at?: string | null
+          last_message_at?: string | null
+          last_outbound_at?: string | null
+          provider: string
+          status?: Database["public"]["Enums"]["conversation_status"]
+          unread_count?: number
+          updated_at?: string
+        }
+        Update: {
+          business_id?: string
+          channel?: Database["public"]["Enums"]["outreach_channel"]
+          contact_id?: string | null
+          created_at?: string
+          external_conversation_id?: string | null
+          id?: string
+          last_inbound_at?: string | null
+          last_message_at?: string | null
+          last_outbound_at?: string | null
+          provider?: string
+          status?: Database["public"]["Enums"]["conversation_status"]
+          unread_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversations_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversations_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inbound_messages: {
+        Row: {
+          business_id: string | null
+          channel: Database["public"]["Enums"]["outreach_channel"]
+          classification_confidence: number | null
+          classification_model: string | null
+          classification_reasoning: Json
+          classification_status: Database["public"]["Enums"]["message_classification_status"]
+          classified_at: string | null
+          contact_id: string | null
+          conversation_id: string | null
+          created_at: string
+          direction: string
+          external_conversation_id: string | null
+          external_message_id: string
+          id: string
+          intent: Database["public"]["Enums"]["response_intent"] | null
+          message_body: string
+          metadata: Json
+          processing_status: Database["public"]["Enums"]["message_processing_status"]
+          provider: string
+          raw_type: string | null
+          received_at: string
+          recipient_identifier: string
+          recommended_action: string | null
+          recommended_action_reason: string | null
+          sales_stage:
+            | Database["public"]["Enums"]["response_sales_stage"]
+            | null
+          sender_identifier: string
+          sentiment: Database["public"]["Enums"]["response_sentiment"] | null
+          urgency: Database["public"]["Enums"]["response_urgency"] | null
+        }
+        Insert: {
+          business_id?: string | null
+          channel: Database["public"]["Enums"]["outreach_channel"]
+          classification_confidence?: number | null
+          classification_model?: string | null
+          classification_reasoning?: Json
+          classification_status?: Database["public"]["Enums"]["message_classification_status"]
+          classified_at?: string | null
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          direction?: string
+          external_conversation_id?: string | null
+          external_message_id: string
+          id?: string
+          intent?: Database["public"]["Enums"]["response_intent"] | null
+          message_body: string
+          metadata?: Json
+          processing_status?: Database["public"]["Enums"]["message_processing_status"]
+          provider: string
+          raw_type?: string | null
+          received_at: string
+          recipient_identifier: string
+          recommended_action?: string | null
+          recommended_action_reason?: string | null
+          sales_stage?:
+            | Database["public"]["Enums"]["response_sales_stage"]
+            | null
+          sender_identifier: string
+          sentiment?: Database["public"]["Enums"]["response_sentiment"] | null
+          urgency?: Database["public"]["Enums"]["response_urgency"] | null
+        }
+        Update: {
+          business_id?: string | null
+          channel?: Database["public"]["Enums"]["outreach_channel"]
+          classification_confidence?: number | null
+          classification_model?: string | null
+          classification_reasoning?: Json
+          classification_status?: Database["public"]["Enums"]["message_classification_status"]
+          classified_at?: string | null
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          direction?: string
+          external_conversation_id?: string | null
+          external_message_id?: string
+          id?: string
+          intent?: Database["public"]["Enums"]["response_intent"] | null
+          message_body?: string
+          metadata?: Json
+          processing_status?: Database["public"]["Enums"]["message_processing_status"]
+          provider?: string
+          raw_type?: string | null
+          received_at?: string
+          recipient_identifier?: string
+          recommended_action?: string | null
+          recommended_action_reason?: string | null
+          sales_stage?:
+            | Database["public"]["Enums"]["response_sales_stage"]
+            | null
+          sender_identifier?: string
+          sentiment?: Database["public"]["Enums"]["response_sentiment"] | null
+          urgency?: Database["public"]["Enums"]["response_urgency"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inbound_messages_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inbound_messages_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inbound_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lead_scores: {
         Row: {
           business_id: string
@@ -705,6 +889,7 @@ export type Database = {
           channel: Database["public"]["Enums"]["outreach_channel"]
           completed_at: string | null
           contact_id: string | null
+          conversation_id: string | null
           created_at: string
           created_by: string | null
           error_code: string | null
@@ -728,6 +913,7 @@ export type Database = {
           channel: Database["public"]["Enums"]["outreach_channel"]
           completed_at?: string | null
           contact_id?: string | null
+          conversation_id?: string | null
           created_at?: string
           created_by?: string | null
           error_code?: string | null
@@ -751,6 +937,7 @@ export type Database = {
           channel?: Database["public"]["Enums"]["outreach_channel"]
           completed_at?: string | null
           contact_id?: string | null
+          conversation_id?: string | null
           created_at?: string
           created_by?: string | null
           error_code?: string | null
@@ -781,6 +968,13 @@ export type Database = {
             columns: ["contact_id"]
             isOneToOne: false
             referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outreach_send_attempts_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
             referencedColumns: ["id"]
           },
           {
@@ -1110,6 +1304,12 @@ export type Database = {
         | "PARTNERSHIP"
         | "REFERRAL"
       contact_verification_status: "VERIFIED" | "UNVERIFIED" | "UNKNOWN"
+      conversation_status:
+        | "OPEN"
+        | "WAITING_FOR_US"
+        | "WAITING_FOR_THEM"
+        | "CLOSED"
+        | "DO_NOT_CONTACT"
       evidence_type: "OBSERVED" | "INFERRED"
       lead_classification:
         | "EXCEPTIONAL"
@@ -1117,6 +1317,12 @@ export type Database = {
         | "MEDIUM"
         | "LOW"
         | "VERY_LOW"
+      message_classification_status:
+        | "PENDING"
+        | "CLASSIFIED"
+        | "SKIPPED"
+        | "FAILED"
+      message_processing_status: "PENDING" | "MATCHED" | "UNMATCHED" | "ERROR"
       opportunity_complexity: "LOW" | "MEDIUM" | "HIGH"
       opportunity_priority: "HIGH" | "MEDIUM" | "LOW" | "CRITICAL"
       opportunity_status:
@@ -1162,6 +1368,30 @@ export type Database = {
         | "LOST"
       product_type: "ZVIKO_LABS" | "DATING_APP"
       recommended_channel: "WHATSAPP" | "EMAIL" | "NONE"
+      response_intent:
+        | "INTERESTED"
+        | "QUESTION"
+        | "REQUEST_FOR_PRICING"
+        | "REQUEST_FOR_MEETING"
+        | "OBJECTION"
+        | "NOT_INTERESTED"
+        | "WRONG_PERSON"
+        | "OPT_OUT"
+        | "POSITIVE_GENERAL"
+        | "NEGATIVE_GENERAL"
+        | "UNCLEAR"
+      response_sales_stage:
+        | "INITIAL_RESPONSE"
+        | "QUALIFICATION"
+        | "DISCOVERY"
+        | "MEETING_REQUEST"
+        | "PRICING"
+        | "PROPOSAL_DISCUSSION"
+        | "CLOSED_WON"
+        | "CLOSED_LOST"
+        | "UNKNOWN"
+      response_sentiment: "POSITIVE" | "NEUTRAL" | "NEGATIVE"
+      response_urgency: "HIGH" | "MEDIUM" | "LOW"
       sales_strategy_status: "ACTIVE" | "SUPERSEDED"
       send_attempt_status: "PENDING" | "SENT" | "FAILED"
       validation_status: "PASSED" | "FAILED"
@@ -1321,8 +1551,22 @@ export const Constants = {
         "REFERRAL",
       ],
       contact_verification_status: ["VERIFIED", "UNVERIFIED", "UNKNOWN"],
+      conversation_status: [
+        "OPEN",
+        "WAITING_FOR_US",
+        "WAITING_FOR_THEM",
+        "CLOSED",
+        "DO_NOT_CONTACT",
+      ],
       evidence_type: ["OBSERVED", "INFERRED"],
       lead_classification: ["EXCEPTIONAL", "HIGH", "MEDIUM", "LOW", "VERY_LOW"],
+      message_classification_status: [
+        "PENDING",
+        "CLASSIFIED",
+        "SKIPPED",
+        "FAILED",
+      ],
+      message_processing_status: ["PENDING", "MATCHED", "UNMATCHED", "ERROR"],
       opportunity_complexity: ["LOW", "MEDIUM", "HIGH"],
       opportunity_priority: ["HIGH", "MEDIUM", "LOW", "CRITICAL"],
       opportunity_status: [
@@ -1372,6 +1616,32 @@ export const Constants = {
       ],
       product_type: ["ZVIKO_LABS", "DATING_APP"],
       recommended_channel: ["WHATSAPP", "EMAIL", "NONE"],
+      response_intent: [
+        "INTERESTED",
+        "QUESTION",
+        "REQUEST_FOR_PRICING",
+        "REQUEST_FOR_MEETING",
+        "OBJECTION",
+        "NOT_INTERESTED",
+        "WRONG_PERSON",
+        "OPT_OUT",
+        "POSITIVE_GENERAL",
+        "NEGATIVE_GENERAL",
+        "UNCLEAR",
+      ],
+      response_sales_stage: [
+        "INITIAL_RESPONSE",
+        "QUALIFICATION",
+        "DISCOVERY",
+        "MEETING_REQUEST",
+        "PRICING",
+        "PROPOSAL_DISCUSSION",
+        "CLOSED_WON",
+        "CLOSED_LOST",
+        "UNKNOWN",
+      ],
+      response_sentiment: ["POSITIVE", "NEUTRAL", "NEGATIVE"],
+      response_urgency: ["HIGH", "MEDIUM", "LOW"],
       sales_strategy_status: ["ACTIVE", "SUPERSEDED"],
       send_attempt_status: ["PENDING", "SENT", "FAILED"],
       validation_status: ["PASSED", "FAILED"],

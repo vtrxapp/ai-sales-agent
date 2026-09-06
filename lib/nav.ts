@@ -11,6 +11,7 @@ import {
   FileSignature,
   BarChart3,
   Send,
+  MessageCircle,
   FileText,
   Sparkles,
 } from "lucide-react"
@@ -35,6 +36,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Signatures", href: "/signatures", icon: FileSignature, comingInPhase: 6 },
   { label: "Analytics", href: "/analytics", icon: BarChart3, comingInPhase: 7 },
   { label: "Outreach", href: "/outreach", icon: Send },
+  { label: "Responses", href: "/responses", icon: MessageCircle },
   { label: "Proposals", href: "/proposals", icon: FileText, comingInPhase: 4 },
   { label: "AI Assistant", href: "/assistant", icon: Sparkles, comingInPhase: 8 },
 ]

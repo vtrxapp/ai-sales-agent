@@ -428,7 +428,7 @@ export async function updateBusinessStatus(
   supabase: SupabaseClient<Database>,
   businessId: string,
   status: Enums<"pipeline_status">,
-  actorId: string
+  actorId: string | null
 ): Promise<Tables<"businesses">> {
   const { data: existing, error: fetchError } = await supabase
     .from("businesses")
@@ -468,7 +468,7 @@ export async function setDoNotContact(
   supabase: SupabaseClient<Database>,
   businessId: string,
   reason: string | null,
-  actorId: string
+  actorId: string | null
 ): Promise<Tables<"businesses">> {
   const { data: business, error } = await supabase
     .from("businesses")

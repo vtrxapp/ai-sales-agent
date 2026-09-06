@@ -9,6 +9,7 @@ import { listSalesStrategies } from "@/lib/services/sales-strategy-service"
 import { listOutreachDrafts } from "@/lib/services/outreach-draft-service"
 import { resolveRecipient, listSendAttempts } from "@/lib/services/outreach-send-service"
 import { getWhatsAppConfigStatus, getEmailConfigStatus } from "@/lib/outreach"
+import { listConversationsForBusiness } from "@/lib/services/response-dashboard-service"
 import type { Enums, Tables } from "@/lib/types/database.types"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -97,6 +98,7 @@ const NEXT_ACTION_LABELS: Record<NextAction, string> = {
   ADD_CONTACT: "Add a contact",
   PREPARE_OUTREACH: "Prepare outreach",
   FOLLOW_UP: "Follow up",
+  RESPOND_TO_PROSPECT: "Respond to prospect",
   SCHEDULE_MEETING: "Schedule a meeting",
   SEND_PROPOSAL: "Send a proposal",
   NO_ACTION: "No action needed",
@@ -112,11 +114,12 @@ export default async function ProspectDetailPage({
   const business = await getBusinessById(supabase, id)
   if (!business) notFound()
 
-  const [activities, salesStrategies, outreachDrafts, sendAttempts] = await Promise.all([
+  const [activities, salesStrategies, outreachDrafts, sendAttempts, conversations] = await Promise.all([
     listRecentActivities(supabase, 30, { entityType: "business", entityId: id }),
     listSalesStrategies(supabase, id),
     listOutreachDrafts(supabase, id),
     listSendAttempts(supabase, id),
+    listConversationsForBusiness(supabase, id),
   ])
 
   // Latest attempt per draft, for the per-draft sent/failed summary shown
@@ -166,7 +169,8 @@ export default async function ProspectDetailPage({
     [...activeOpportunities].sort((a, b) => (b.score ?? -1) - (a.score ?? -1))[0] ?? null
   const sortedOpportunities = [...business.opportunities].sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
 
-  const nextAction = getNextAction(business)
+  const needsResponse = conversations.some((c) => c.status === "WAITING_FOR_US")
+  const nextAction = getNextAction(business, needsResponse)
 
   return (
     <div className="flex flex-col gap-6">
@@ -391,6 +395,60 @@ export default async function ProspectDetailPage({
                 ))}
               </TableBody>
             </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Responses</CardTitle>
+          <CardDescription>Sales intelligence from replies - what they said, what it means, what to consider doing next.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {conversations.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No responses yet.</p>
+          ) : (
+            conversations.map((c) => (
+              <div key={c.id} className="flex flex-col gap-2 rounded-md border border-border p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">{c.channel}</Badge>
+                  <Badge
+                    variant={
+                      c.status === "WAITING_FOR_US"
+                        ? "warning"
+                        : c.status === "WAITING_FOR_THEM"
+                          ? "success"
+                          : c.status === "DO_NOT_CONTACT"
+                            ? "destructive"
+                            : "secondary"
+                    }
+                  >
+                    {c.status.replace(/_/g, " ")}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {c.responseCount} response{c.responseCount === 1 ? "" : "s"}
+                  </span>
+                </div>
+                {c.latestMessage && (
+                  <>
+                    <p className="text-sm italic text-muted-foreground">&ldquo;{c.latestMessage.message_body}&rdquo;</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {c.latestMessage.intent && <Badge variant="outline">{c.latestMessage.intent.replace(/_/g, " ")}</Badge>}
+                      {c.latestMessage.sentiment && <Badge variant="outline">{c.latestMessage.sentiment}</Badge>}
+                    </div>
+                    {c.latestMessage.recommended_action && (
+                      <p className="text-sm">
+                        <span className="font-medium">Recommended: </span>
+                        {c.latestMessage.recommended_action}
+                      </p>
+                    )}
+                  </>
+                )}
+                <Link href={`/responses/${c.id}`} className="text-sm text-primary hover:underline">
+                  View conversation
+                </Link>
+              </div>
+            ))
           )}
         </CardContent>
       </Card>

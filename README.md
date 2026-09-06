@@ -15,17 +15,19 @@ Full background, architecture decisions, and the phase-by-phase build plan
 are in [`PROJECT_AUDIT.md`](./PROJECT_AUDIT.md). This README is the
 practical "how do I run/deploy/test this" guide.
 
-**Current status: Phase 5 (Actual Outreach Infrastructure).** Auth, the
-app shell, products, campaigns, lead discovery, the business/prospect
-database, lead scoring, website audits, the full opportunity engine,
-the sales pipeline, sales strategy generation, WhatsApp/email outreach
-drafting, and now **actual sending** — via the official WhatsApp
-Business Platform (Meta Cloud API) and Resend — are functional, always
-behind an explicit human confirmation. Proposals, audiences,
-signatures, analytics, and the AI assistant are real pages with honest
-"coming in Phase N" placeholders — see the sidebar. AI replies,
-automated follow-ups, and mass sending are explicitly out of scope for
-this phase (and the next).
+**Current status: Phase 6 (Response Tracking & Sales Intelligence).**
+Auth, the app shell, products, campaigns, lead discovery, the
+business/prospect database, lead scoring, website audits, the full
+opportunity engine, the sales pipeline, sales strategy generation,
+WhatsApp/email outreach drafting and sending, and now **inbound
+response tracking** — real WhatsApp and email replies arrive via
+official provider webhooks, get matched to the right business, are
+AI-classified for intent/sentiment/urgency, and surface as a
+recommended next action a human decides on at `/responses`. Proposals,
+audiences, signatures, and the AI assistant are real pages with honest
+"coming in Phase N" placeholders — see the sidebar. AI-generated
+replies are never sent automatically; automated follow-ups, negotiation,
+and mass sending remain explicitly out of scope.
 
 ## Architecture at a glance
 
@@ -55,11 +57,15 @@ can be extended the same way — just without the CLI as a dependency.
 ```
 app/
   (dashboard)/        Authenticated routes: overview, products, campaigns,
-                       leads, prospects, pipeline, and the Phase 5+ stub
-                       pages (audiences, outreach, proposals, ...)
+                       leads, prospects, pipeline, outreach, responses, and
+                       the remaining Phase 7+ stub pages (audiences,
+                       proposals, ...)
+  api/webhooks/        Route Handlers with NO Supabase session (see
+                       "Response tracking setup") - whatsapp/, resend/
   login/               Sign-in page (password + magic link)
   auth/callback/       Supabase magic-link callback
-  actions/             Server Actions (auth, campaigns, leads, businesses, outreach)
+  actions/             Server Actions (auth, campaigns, leads, businesses,
+                       outreach, responses)
 components/
   ui/                  Hand-built shadcn-style primitives
   shell/               Sidebar + topbar (app shell)
@@ -67,6 +73,8 @@ components/
   leads/, prospects/   Feature-specific components (discovery, bulk actions,
                        research/score/audit buttons, contact/opportunity forms,
                        Generate Outreach action, outreach draft review card)
+  responses/           Conversation actions, reclassify button, unmatched-
+                       message assignment form
 lib/
   ai/                  AIProvider interface + Anthropic adapter (lib/ai/index.ts
                        is the factory - throws a typed error if unconfigured)
@@ -76,20 +84,37 @@ lib/
                        (index.ts) that throws a typed *NotConfiguredError
                        when credentials are missing, and test-only mock
                        providers (never wired into the factory)
-  supabase/            Browser/server/admin Supabase clients + proxy session helper
+  inbound/             InboundMessageProvider interface + the concrete
+                       WhatsAppInboundProvider (webhook signature
+                       verification + payload normalization) and
+                       EmailInboundProvider (Resend Standard Webhooks
+                       verification + Receiving API), behind the same
+                       config-driven factory pattern as lib/outreach/
+  supabase/            Browser/server/admin Supabase clients + proxy session
+                       helper - admin.ts (service-role, bypasses RLS) is
+                       used only by app/api/webhooks/*, nowhere else
   services/            Business logic (BusinessService, ContactService,
                        LeadResearchService, LeadScoringService,
                        WebsiteAuditService, OpportunityAnalysisService,
                        OpportunityService (dedup + scoring),
-                       NextActionService (pure decision tree),
-                       SalesStrategyService, OutreachDraftService,
-                       OutreachSendService (the send/retry state
-                       machine + idempotency), phone-normalization (pure,
-                       WhatsApp-API-ready number formatting),
-                       opportunity/contact/channel-selection (pure,
-                       deterministic), message-quality (validation +
-                       personalization scoring, pure), DeduplicationService,
-                       ...) — never call Supabase directly from a page/component
+                       NextActionService (pure decision tree, now
+                       response-aware), SalesStrategyService,
+                       OutreachDraftService, OutreachSendService (the
+                       send/retry state machine + idempotency),
+                       phone-normalization (pure, WhatsApp-API-ready
+                       number formatting), opportunity/contact/channel-
+                       selection (pure, deterministic), message-quality
+                       (validation + personalization scoring, pure),
+                       DeduplicationService, response-matching-service
+                       (sender-to-business matching + conversation
+                       lifecycle), response-classification-service (AI
+                       intent/sentiment/urgency classification),
+                       response-action-service (pure recommended-action
+                       mapping), response-processing-service (the
+                       webhook-to-database pipeline + opt-out/CRM sync),
+                       response-dashboard-service (read models for
+                       /responses and the prospect page), ...) — never
+                       call Supabase directly from a page/component
   services/discovery/  LeadDiscoveryProvider interface + the AI-web-search
                        implementation (swap in a paid provider later without
                        touching callers)
@@ -99,7 +124,8 @@ lib/
   nav.ts               Sidebar navigation config
 proxy.ts               Next.js 16's replacement for middleware.ts — refreshes
                        the Supabase session and redirects unauthenticated
-                       requests to /login
+                       requests to /login (except /api/webhooks - see
+                       lib/supabase/middleware.ts)
 supabase/migrations/   SQL migrations, applied in order
 ```
 
@@ -223,6 +249,63 @@ of Resend) means writing a new class implementing `OutreachProvider` in
 `lib/outreach/` - no changes needed anywhere that calls
 `sendOutreachMessage`.
 
+## Response tracking setup
+
+Receiving and understanding replies (as opposed to sending) needs its
+own webhook configuration, on top of everything in "Sending setup"
+above. Without it, outreach still works exactly as in Phase 5 - you
+simply won't see replies arrive automatically in `/responses`.
+
+Both webhook routes (`app/api/webhooks/whatsapp`, `app/api/webhooks/resend`)
+are deliberately **not** behind the app's normal Supabase-session auth
+gate - Meta and Resend call them directly with no user logged in - so
+each one authenticates the *request* itself via the provider's own
+signature scheme before touching the database, and uses the
+service-role Supabase client (`lib/supabase/admin.ts`) rather than the
+normal per-request one. See "Security notes" below for why this is safe.
+
+### WhatsApp inbound
+
+1. In the same Meta app used for sending, go to WhatsApp → Configuration
+   → Webhook and enter your callback URL:
+   `https://<your-deployment>/api/webhooks/whatsapp`, plus a **Verify
+   token** - any string you choose, matching `WHATSAPP_WEBHOOK_VERIFY_TOKEN`
+   below.
+2. Subscribe to the `messages` field so Meta actually sends you inbound
+   message events (verifying the callback URL alone isn't enough).
+3. Set `WHATSAPP_APP_SECRET` (Meta App Dashboard → App Settings → Basic
+   - not the access token) and `WHATSAPP_WEBHOOK_VERIFY_TOKEN` in
+   `.env.local` and in Vercel.
+4. Locally, Meta needs a public HTTPS URL to call - use a tunnel (e.g.
+   `ngrok http 3000`) and point the webhook at the tunnel URL while
+   testing.
+
+Only plain text inbound messages are classified; other WhatsApp message
+types (images, voice notes, etc.) are still stored so the conversation
+stays complete, with a placeholder body noting the type - see "Known
+limitations" below.
+
+### Email inbound
+
+1. In the Resend dashboard, set up a receiving domain or address
+   (Resend → Receiving) if you haven't already.
+2. Create a webhook (Resend → Webhooks) pointed at
+   `https://<your-deployment>/api/webhooks/resend`, subscribed to the
+   `email.received` event. Resend gives you a signing secret
+   (`whsec_...`) at this point.
+3. Set `RESEND_WEBHOOK_SECRET` to that value in `.env.local` and in
+   Vercel (`RESEND_API_KEY` is reused from "Sending setup" - the same
+   key both sends and fetches received message content).
+
+### Local testing without real webhooks
+
+You can exercise the whole pipeline without waiting for a real message:
+`curl` the webhook route directly with a crafted payload (see the
+shapes in `lib/inbound/whatsapp-inbound-provider.ts` and
+`email-inbound-provider.ts`, and the fixtures in their test files) -
+just note that without a correctly signed request, both routes reject
+it with 401, by design.
+
 ## Setup
 
 ### 1. Prerequisites
@@ -268,12 +351,14 @@ NEXT_PUBLIC_SUPABASE_URL=https://<your-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-or-publishable-key>
 ```
 
-`SUPABASE_SERVICE_ROLE_KEY` is a placeholder, not used yet — leave it
-blank. `ANTHROPIC_API_KEY` (drafting) and the `WHATSAPP_*`/`RESEND_*`
-variables (actual sending — see "Sending setup" above) can also be left
-blank to run the rest of the app; each missing group disables only its
-own feature with a clear message, never a silent failure. **Never**
-commit `.env.local` or put real secrets in `.env.example`.
+`SUPABASE_SERVICE_ROLE_KEY` can be left blank unless you're testing the
+response-tracking webhooks (see "Response tracking setup" below) — it's
+only read by `app/api/webhooks/*`, nowhere else. `ANTHROPIC_API_KEY`
+(drafting) and the `WHATSAPP_*`/`RESEND_*` variables (actual sending —
+see "Sending setup" above) can also be left blank to run the rest of the
+app; each missing group disables only its own feature with a clear
+message, never a silent failure. **Never** commit `.env.local` or put
+real secrets in `.env.example`.
 
 ### 5. Create your first user
 
@@ -344,6 +429,38 @@ is worth doing after pulling this branch — in particular:
   report's "realistic message quality" section for how this was assessed
   without a live key).
 
+**Response tracking (Phase 6)** is tested the same way — mocked
+providers/AI, fake Supabase client, no real credentials needed to run
+any of it:
+- `lib/inbound/whatsapp-inbound-provider.test.ts` and
+  `email-inbound-provider.test.ts` cover signature verification and
+  payload normalization against crafted fixture payloads, never a real
+  Meta/Resend account. The email provider test mocks the `resend`
+  package itself (`vi.mock("resend", ...)` with `vi.hoisted()` for the
+  `webhooks.verify`/`emails.receiving.get` mocks — a plain arrow
+  function can't stand in for the SDK's class constructor, so the mock
+  uses a named `function MockResend()` instead).
+- `response-matching-service.test.ts`, `response-classification-service.test.ts`,
+  and `response-processing-service.test.ts` exercise the matching,
+  classification, and end-to-end webhook-to-database pipeline against a
+  fake Supabase client (same pattern as the rest of the suite) with
+  `@/lib/ai` mocked out — no real `ANTHROPIC_API_KEY` needed.
+- `response-processing-service.test.ts` also mocks `next/server`'s
+  `after()` (`vi.mock("next/server", () => ({ after: (fn) =>
+  afterCallbacks.push(fn) }))`) so classification's deferred work can be
+  captured and flushed manually inside a test rather than actually
+  racing the real event loop — this is what lets a test assert a
+  message is `classification_status: "PENDING"` immediately after the
+  webhook handler returns, then `"CLASSIFIED"` only after the captured
+  callback is flushed.
+- `tests/e2e/phase6-routes.spec.ts` adds 4 live Playwright tests against
+  a running dev server: `/responses` and `/responses/[id]` redirect to
+  `/login` unauthenticated (same as every other dashboard route), and
+  both webhook routes are confirmed reachable *without* a session and
+  reject bad/unsigned requests with the correct status code — proving
+  the `PUBLIC_ROUTES` exemption in `lib/supabase/middleware.ts` actually
+  works, not just that the code reads like it should.
+
 ## Deployment (Vercel)
 
 1. Import the GitHub repo into a **new** Vercel project (this repo isn't
@@ -382,6 +499,38 @@ is worth doing after pulling this branch — in particular:
   unique partial index (`outreach_send_attempts_one_pending_per_draft`)
   allowing at most one `PENDING` attempt per draft — not just a disabled
   button in the UI.
+- **Response tracking (Phase 6)**: `conversations` and `inbound_messages`
+  have RLS enabled with `authenticated`-only SELECT/INSERT/UPDATE
+  policies (no DELETE — inbound messages are append-only/immutable by
+  design), confirmed via a direct `pg_policies` query after the
+  migration (6 policies total: 3 per table, all scoped to
+  `{authenticated}`). The two webhook routes are the one deliberate
+  exception to "every route requires a Supabase session": Meta and
+  Resend call them directly with no user logged in, so instead each
+  route verifies the *request itself* — WhatsApp via
+  `X-Hub-Signature-256` (HMAC-SHA256 of the raw body using
+  `WHATSAPP_APP_SECRET`, compared with `crypto.timingSafeEqual` to avoid
+  a timing side-channel) and Resend via its Standard Webhooks/Svix
+  signature (`resend.webhooks.verify`, `RESEND_WEBHOOK_SECRET`) — before
+  ever touching the database, and only then uses the service-role client
+  (`lib/supabase/admin.ts`) to bypass RLS. That client is used *only*
+  inside `app/api/webhooks/whatsapp/route.ts` and
+  `app/api/webhooks/resend/route.ts`; every other route, including
+  `/responses` and its server actions, still goes through the normal
+  authenticated per-request client. `WHATSAPP_APP_SECRET`,
+  `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, and `RESEND_WEBHOOK_SECRET` are read
+  only inside `lib/inbound/` and never appear in client bundles,
+  database rows, activity metadata, or logs. Neither webhook route ever
+  trusts a client-supplied business/contact/conversation ID — inbound
+  senders are matched server-side against stored phone numbers/email
+  addresses (`response-matching-service.ts`), and an unmatched sender is
+  stored with `processing_status: "UNMATCHED"` rather than guessed into
+  the wrong business (see "Known limitations (Phase 6)" for the manual
+  resolution flow). Idempotency is enforced at the database level via a
+  unique constraint on `(provider, external_message_id)` — a webhook
+  retry (both Meta and Resend can and do redeliver) is detected via the
+  Postgres `23505` error code and treated as a no-op, never a duplicate
+  message or a duplicate classification call.
 
 ## Troubleshooting
 
@@ -393,6 +542,79 @@ is worth doing after pulling this branch — in particular:
 - **New user can't see any data**: RLS requires an authenticated session;
   confirm the user was created via the Dashboard (not some other path) and
   that `public.profiles` has a matching row.
+
+## Known limitations (Phase 6)
+
+- **No live WhatsApp or Resend webhook delivery was tested in this
+  environment.** There are no real Meta App/Resend account credentials
+  here, and no public HTTPS URL reachable from Meta's/Resend's servers
+  from this sandbox (a real deployment needs a tunnel like ngrok for
+  local testing, or a real Vercel deployment — see "Response tracking
+  setup" above). What *was* verified: the webhook logic itself against
+  340 passing Vitest tests using crafted fixture payloads and mocked
+  signatures/AI, and 4 live Playwright tests confirming the actual HTTP
+  routing — both routes are reachable without a session and correctly
+  reject bad/unsigned requests — against a genuinely running dev server
+  (still synthetic request bodies, not real Meta/Resend traffic). Do not
+  read this as "the webhooks were tested end-to-end with a real
+  provider" — they weren't; see the Phase 6 report for the precise
+  breakdown of what was and wasn't verified live.
+- **"Draft Response" (AI-drafted reply text, reusing the existing
+  approve → Send pipeline) was deliberately deferred, not built.** The
+  spec for this phase explicitly allowed this: "if adding this feature
+  risks destabilizing the core response tracking, leave it as a clearly
+  documented Phase 6.1 follow-up." The core scope (2-channel webhook
+  infrastructure, classification, conversation modeling, the dashboard,
+  the conversation/prospect-page integration, notifications, analytics,
+  and this phase's own extensive security/testing requirements) was
+  already substantial, so drafting a reply is left for a follow-up
+  phase. Today, responding is entirely manual — a human reads the
+  conversation at `/responses/[conversationId]` and sends a fresh reply
+  themselves outside the app, then can optionally record that with
+  `markRepliedOutsideAppAction` (bookkeeping only, described below).
+- **Non-text WhatsApp messages (images, voice notes, documents,
+  stickers, etc.) are stored but never classified.** They're saved with
+  a placeholder body (`[Unsupported WhatsApp message type: X]`) and
+  `metadata.unsupported_type: true` so the conversation timeline stays
+  complete and nothing is silently dropped, but sales-intelligence
+  classification only runs against plain text message bodies today.
+- **Email thread matching relies primarily on sender-address matching,
+  not verified Message-ID/In-Reply-To correlation to this app's own
+  sent messages.** `EmailInboundProvider` does extract `In-Reply-To`/
+  `References` headers into `externalConversationId` when present, but
+  whether a reply's headers actually reference a Message-ID this app
+  generated when sending (Phase 5's `ResendEmailProvider`) was not
+  independently verified against a real Resend account — the primary,
+  verified matching path is the contact's/business's stored email
+  address, same as WhatsApp's phone-based matching.
+- **Conversations are business-level, not per-contact** — the same
+  design decision Phase 5 made for Do Not Contact, kept consistent here.
+  A business with two contacts replying on the same channel share one
+  conversation thread rather than getting separate ones.
+- **`markRepliedOutsideAppAction` is bookkeeping only — it does not send
+  anything.** It exists so a human who replied to a prospect through
+  WhatsApp/email directly (outside this app) can flip the conversation
+  back to `WAITING_FOR_THEM` so it stops showing as needing a response;
+  it never calls a provider, stores no message content, and is not a
+  second send mechanism.
+- **Opportunity response intelligence groups by `opportunity_type`
+  (e.g. "Website Redesign"), not by individual opportunity row.** This
+  matches the spec's own "simple-join based, not over-engineered"
+  instruction (section 28) — answering "which *kind* of opportunity
+  produces the most responses" rather than tracking dozens of
+  individual opportunity rows' response rates separately.
+- **Not every filter dimension listed in the spec's dashboard section
+  was implemented.** Status, channel, intent, industry, and CRM stage
+  filters all work on `/responses`; lead-score range and date-range
+  filters were left out to keep the first version's query/UI simple —
+  worth adding as a follow-up if they turn out to matter in practice.
+- **Delivery/read receipts (WhatsApp `statuses` webhook events) are
+  parsed out and ignored, not processed.** This phase's scope is
+  *inbound* messages; Phase 5's outbound sending already only ever
+  records `SENT` (see "Known limitations (Phase 5)" below) — Phase 6
+  doesn't change that, since acting on delivery/read receipts wasn't
+  part of this phase's objective (knowing who *replied*, not who merely
+  received/read a message).
 
 ## Known limitations (Phase 5)
 
@@ -523,13 +745,24 @@ is worth doing after pulling this branch — in particular:
 
 ## Roadmap
 
-Phase 5 (this phase) added actual outreach sending — WhatsApp Business
-Platform + Resend, against the `OutreachProvider` interface prepared in
-Phase 4 — per this phase's explicit instructions. Recommended next
-(per the Phase 5 report): reply/response tracking and a lightweight CRM
-follow-up workflow, still with no AI-driven auto-replies or negotiation.
-Note this differs from `PROJECT_AUDIT.md`'s original Phase 0 plan, where
-Phase 5 was Dating App Growth; see the Phase 4 report for this
-discrepancy. Beyond sending, see `PROJECT_AUDIT.md` for the rest of the
-phase plan (Dating App Growth, Signatures, Marketing Intelligence, AI
-Growth Advisor, Automation, Production Hardening).
+Phase 6 (this phase) added inbound response tracking and sales
+intelligence — official WhatsApp/Resend webhooks, AI-assisted intent/
+sentiment/urgency classification behind the existing `AIProvider`
+abstraction, a deterministic recommended-next-action engine, the
+`/responses` dashboard and conversation page, prospect-page and overview
+integration, opt-out suppression, and CRM sync (CONTACTED → REPLIED
+only — never further) — per this phase's explicit instructions. The
+system still never replies, negotiates, or follows up automatically;
+every response is a human decision.
+
+Recommended next (per the Phase 6 report): **Phase 6.1 — Draft Response**,
+the one feature this phase's own spec explicitly sanctioned deferring —
+an AI-drafted reply (reusing the existing `OutreachDraftService`/Send
+pipeline, never a second send mechanism, never auto-sent) a human can
+edit and approve from the conversation page, closing the loop from
+"see what they said" to "respond" without leaving the app. Beyond that,
+see `PROJECT_AUDIT.md` for the rest of the phase plan (Dating App
+Growth, Signatures, Marketing Intelligence, AI Growth Advisor,
+Automation, Production Hardening). Note the phase numbering has
+diverged from `PROJECT_AUDIT.md`'s original Phase 0 plan since Phase 5;
+see the Phase 4 report for that discrepancy.
