@@ -3,7 +3,7 @@ import { Sparkles } from "lucide-react"
 
 import { createClient } from "@/lib/supabase/server"
 import { listProducts } from "@/lib/services/product-service"
-import { getOverviewStats, getPipelineStats } from "@/lib/services/analytics-service"
+import { getOverviewStats, getPipelineStats, getOutreachStats } from "@/lib/services/analytics-service"
 import { listRecentActivities } from "@/lib/services/activity-service"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { ActivityFeed } from "@/components/dashboard/activity-feed"
@@ -12,10 +12,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 
 export default async function OverviewPage() {
   const supabase = await createClient()
-  const [products, stats, pipelineStats, activities] = await Promise.all([
+  const [products, stats, pipelineStats, outreachStats, activities] = await Promise.all([
     listProducts(supabase),
     getOverviewStats(supabase),
     getPipelineStats(supabase),
+    getOutreachStats(supabase),
     listRecentActivities(supabase, 10),
   ])
 
@@ -47,6 +48,26 @@ export default async function OverviewPage() {
             <Link href="/prospects?status=NEW&sort=score_desc" className="text-primary hover:underline">
               {pipelineStats.highValueUncontactedCount} high-scoring prospect
               {pipelineStats.highValueUncontactedCount === 1 ? "" : "s"} haven&apos;t been contacted yet
+            </Link>
+          </p>
+        )}
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Sales &amp; outreach intelligence</h2>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          <StatCard label="Qualified" value={outreachStats.qualifiedProspects} />
+          <StatCard label="With opportunities" value={outreachStats.prospectsWithOpportunities} />
+          <StatCard label="Ready for outreach" value={outreachStats.prospectsReadyForOutreach} />
+          <StatCard label="Drafts needing review" value={outreachStats.draftsAwaitingReview} />
+          <StatCard label="Approved drafts" value={outreachStats.approvedDrafts} />
+          <StatCard label="High-priority opportunities" value={outreachStats.highPriorityOpportunities} />
+        </div>
+        {outreachStats.draftsAwaitingReview > 0 && (
+          <p className="mt-3 text-sm">
+            <Link href="/prospects?needs_review=on" className="text-primary hover:underline">
+              {outreachStats.draftsAwaitingReview} outreach draft{outreachStats.draftsAwaitingReview === 1 ? "" : "s"}{" "}
+              need review
             </Link>
           </p>
         )}

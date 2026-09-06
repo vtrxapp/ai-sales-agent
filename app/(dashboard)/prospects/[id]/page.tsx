@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server"
 import { getBusinessById } from "@/lib/services/business-service"
 import { listRecentActivities } from "@/lib/services/activity-service"
 import { getNextAction, type NextAction } from "@/lib/services/next-action-service"
+import { listSalesStrategies } from "@/lib/services/sales-strategy-service"
+import { listOutreachDrafts } from "@/lib/services/outreach-draft-service"
 import type { Enums } from "@/lib/types/database.types"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -14,11 +16,15 @@ import { StatusControl } from "@/components/prospects/status-control"
 import { OpportunityStatusControl } from "@/components/prospects/opportunity-status-control"
 import { AddContactForm } from "@/components/prospects/add-contact-form"
 import { AddOpportunityForm } from "@/components/prospects/add-opportunity-form"
+import { GenerateOutreachAction } from "@/components/prospects/generate-outreach-action"
+import { OutreachDraftCard } from "@/components/prospects/outreach-draft-card"
 
 // Website audits chain up to 3 sequential AI calls (research + audit
-// extraction + opportunity analysis) - a slow site can approach this
-// budget. Raise this if the Vercel plan in use supports a higher function
-// duration; left at 60 here since that isn't known.
+// extraction + opportunity analysis), and Generate Outreach chains up to
+// 2 more (sales strategy + message variants) - a slow site or a long
+// research history can approach this budget. Raise this if the Vercel
+// plan in use supports a higher function duration; left at 60 here since
+// that isn't known.
 export const maxDuration = 60
 
 type Observation = { fact: string; source_url?: string }
@@ -102,7 +108,19 @@ export default async function ProspectDetailPage({
   const business = await getBusinessById(supabase, id)
   if (!business) notFound()
 
-  const activities = await listRecentActivities(supabase, 30, { entityType: "business", entityId: id })
+  const [activities, salesStrategies, outreachDrafts] = await Promise.all([
+    listRecentActivities(supabase, 30, { entityType: "business", entityId: id }),
+    listSalesStrategies(supabase, id),
+    listOutreachDrafts(supabase, id),
+  ])
+
+  const activeStrategy = salesStrategies.find((s) => s.status === "ACTIVE") ?? null
+  const strategyOpportunity = activeStrategy
+    ? (business.opportunities.find((o) => o.id === activeStrategy.opportunity_id) ?? null)
+    : null
+  const strategyContact = activeStrategy?.target_contact_id
+    ? (business.contacts.find((c) => c.id === activeStrategy.target_contact_id) ?? null)
+    : null
 
   const latestResearch = business.research_notes[0] ?? null
   const digitalPresence = (latestResearch?.digital_presence ?? {}) as DigitalPresence
@@ -192,6 +210,91 @@ export default async function ProspectDetailPage({
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Sales intelligence</CardTitle>
+          <CardDescription>
+            {activeStrategy
+              ? `Generated ${new Date(activeStrategy.generated_at).toLocaleString()} - confidence ${Math.round((activeStrategy.confidence ?? 0) * 100)}%${salesStrategies.length > 1 ? ` (${salesStrategies.length} strategies on file)` : ""}`
+              : "No sales strategy yet - use Generate Outreach below to build one from existing research, audit, and opportunities."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {activeStrategy ? (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Field label="Why contact this business?" value={activeStrategy.primary_problem} />
+              <Field label="Primary opportunity" value={strategyOpportunity?.title ?? "-"} />
+              <Field label="Recommended service" value={activeStrategy.recommended_service} />
+              <Field label="Recommended channel" value={<Badge variant="outline">{activeStrategy.recommended_channel}</Badge>} />
+              <div className="md:col-span-2">
+                <Field
+                  label="Evidence"
+                  value={
+                    <>
+                      <Badge variant={activeStrategy.evidence_type === "OBSERVED" ? "success" : "secondary"} className="mr-2">
+                        {activeStrategy.evidence_type}
+                      </Badge>
+                      {activeStrategy.supporting_evidence}
+                    </>
+                  }
+                />
+              </div>
+              <div className="md:col-span-2">
+                <Field label="Expected benefit" value={activeStrategy.expected_business_benefit} />
+              </div>
+              <Field
+                label="Recommended contact"
+                value={
+                  strategyContact
+                    ? `${strategyContact.name}${strategyContact.job_title ? ` (${strategyContact.job_title})` : ""}`
+                    : "Business-level (no named contact on file)"
+                }
+              />
+              <Field label="Priority" value={<Badge variant={priorityVariant(activeStrategy.priority)}>{activeStrategy.priority}</Badge>} />
+              <div className="md:col-span-2">
+                <Field label="Sales angle" value={activeStrategy.sales_angle} />
+              </div>
+              <div className="md:col-span-2">
+                <Field label="Value proposition" value={activeStrategy.value_proposition} />
+              </div>
+              {(activeStrategy.things_to_avoid as string[]).length > 0 && (
+                <div className="md:col-span-2">
+                  <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Things to avoid</p>
+                  <ul className="list-disc pl-4 text-sm text-muted-foreground">
+                    {(activeStrategy.things_to_avoid as string[]).map((item, index) => (
+                      <li key={index}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Generate outreach below once research, audit, and at least one opportunity are on file.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Outreach</CardTitle>
+          <CardDescription>Generated drafts for human review - nothing is ever sent automatically.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <GenerateOutreachAction businessId={business.id} hasExisting={outreachDrafts.length > 0} />
+          {outreachDrafts.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No outreach drafts yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-4">
+              {outreachDrafts.map((draft) => (
+                <OutreachDraftCard key={`${draft.id}-${draft.updated_at}`} businessId={business.id} draft={draft} />
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>

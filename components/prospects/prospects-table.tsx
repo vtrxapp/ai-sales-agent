@@ -131,6 +131,7 @@ export function ProspectsTable({ businesses }: { businesses: BusinessListItem[] 
             <TableHead>Status</TableHead>
             <TableHead>Contact</TableHead>
             <TableHead>Opportunities</TableHead>
+            <TableHead>Outreach</TableHead>
             <TableHead>Last researched</TableHead>
           </TableRow>
         </TableHeader>
@@ -197,6 +198,21 @@ export function ProspectsTable({ businesses }: { businesses: BusinessListItem[] 
                 ) : (
                   0
                 )}
+              </TableCell>
+              <TableCell>
+                <div className="flex flex-wrap gap-1">
+                  {business.has_approved_draft && <Badge variant="success">Approved</Badge>}
+                  {business.needs_review && <Badge variant="warning">Needs review</Badge>}
+                  {!business.has_approved_draft && !business.needs_review && business.has_outreach_draft && (
+                    <Badge variant="secondary">Drafted</Badge>
+                  )}
+                  {!business.has_outreach_draft && business.has_active_sales_strategy && (
+                    <Badge variant="outline">Strategy only</Badge>
+                  )}
+                  {!business.has_active_sales_strategy && !business.has_outreach_draft && (
+                    <span className="text-muted-foreground">-</span>
+                  )}
+                </div>
               </TableCell>
               <TableCell className="text-muted-foreground">
                 {business.last_researched_at

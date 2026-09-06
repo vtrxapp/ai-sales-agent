@@ -15,13 +15,14 @@ Full background, architecture decisions, and the phase-by-phase build plan
 are in [`PROJECT_AUDIT.md`](./PROJECT_AUDIT.md). This README is the
 practical "how do I run/deploy/test this" guide.
 
-**Current status: Phase 3 (Website Audit & Opportunity Engine).** Auth, the
-app shell, products, campaigns, lead discovery, the business/prospect
-database, lead scoring, website audits, the full opportunity engine
-(deduplicated, scored, explainable), and the sales pipeline are
-functional. Outreach, proposals, audiences, signatures, analytics, and
-the AI assistant are real pages with honest "coming in Phase N"
-placeholders — see the sidebar.
+**Current status: Phase 4 (Outreach Intelligence Engine).** Auth, the app
+shell, products, campaigns, lead discovery, the business/prospect
+database, lead scoring, website audits, the full opportunity engine,
+the sales pipeline, and now sales strategy generation + WhatsApp/email
+outreach *drafting* (never sending) are functional. Proposals,
+audiences, signatures, analytics, and the AI assistant are real pages
+with honest "coming in Phase N" placeholders — see the sidebar. Actual
+message sending is Phase 5, not yet built.
 
 ## Architecture at a glance
 
@@ -51,28 +52,34 @@ can be extended the same way — just without the CLI as a dependency.
 ```
 app/
   (dashboard)/        Authenticated routes: overview, products, campaigns,
-                       leads, prospects, pipeline, and the Phase 3+ stub
+                       leads, prospects, pipeline, and the Phase 5+ stub
                        pages (audiences, outreach, proposals, ...)
   login/               Sign-in page (password + magic link)
   auth/callback/       Supabase magic-link callback
-  actions/             Server Actions (auth, campaigns, leads, businesses)
+  actions/             Server Actions (auth, campaigns, leads, businesses, outreach)
 components/
   ui/                  Hand-built shadcn-style primitives
   shell/               Sidebar + topbar (app shell)
   dashboard/           EmptyState, StatCard, ActivityFeed, PhaseStub
   leads/, prospects/   Feature-specific components (discovery, bulk actions,
-                       research/score buttons, contact/opportunity forms)
+                       research/score/audit buttons, contact/opportunity forms,
+                       Generate Outreach action, outreach draft review card)
 lib/
   ai/                  AIProvider interface + Anthropic adapter (lib/ai/index.ts
                        is the factory - throws a typed error if unconfigured)
+  outreach/            OutreachProvider interface only (Phase 5 will implement
+                       WhatsApp/email sending against it) - no sending code here
   supabase/            Browser/server/admin Supabase clients + proxy session helper
   services/            Business logic (BusinessService, ContactService,
                        LeadResearchService, LeadScoringService,
                        WebsiteAuditService, OpportunityAnalysisService,
                        OpportunityService (dedup + scoring),
                        NextActionService (pure decision tree),
-                       DeduplicationService, ...) — never call Supabase
-                       directly from a page/component
+                       SalesStrategyService, OutreachDraftService,
+                       opportunity/contact/channel-selection (pure,
+                       deterministic), message-quality (validation +
+                       personalization scoring, pure), DeduplicationService,
+                       ...) — never call Supabase directly from a page/component
   services/discovery/  LeadDiscoveryProvider interface + the AI-web-search
                        implementation (swap in a paid provider later without
                        touching callers)
@@ -125,11 +132,34 @@ What it's used for:
   the prompts explicitly instruct the model to ignore any instruction-like
   text found on a page and never let it override these system prompts.
 
+- **Generate Outreach** (on a prospect's page): chains two AI calls behind
+  deterministic selection logic. First, `selectPrimaryOpportunity`
+  (`lib/services/opportunity-selection.ts`) picks the opportunity to sell -
+  purely from the already-validated stored scores, not an AI decision - and
+  `selectBestContact`/`determineChannel` pick the contact and channel from a
+  fixed priority ladder (a phone number is *never* automatically treated as
+  a WhatsApp number - only an explicit `whatsapp_status: AVAILABLE` counts).
+  A single AI call then builds a **sales strategy** around that fixed
+  context (problem, evidence, angle, value proposition, objections) -
+  it never re-picks the opportunity, service, contact, or channel. A second
+  AI call generates up to 3 message variants (Recommended/Direct/
+  Conversational) for the one channel already chosen - never both channels,
+  and never a fresh web search (it reuses research/audit evidence already
+  on file). Every draft is then run through **deterministic** validation
+  (placeholders, banned generic phrases, length, suspicious URLs, an
+  evidence anchor check) and a **deterministic** 0-100 personalization
+  score (`lib/services/message-quality.ts`, weights documented in
+  `PERSONALIZATION_WEIGHTS`) - neither is ever AI self-graded. A draft that
+  fails validation is marked `NEEDS_REVIEW` and cannot be approved until
+  edited (which always re-validates) or regenerated.
+
 None of this ever sends anything — no WhatsApp, email, or SMS, and no
-automatic contact of any business. The prospect page's "Next recommended
-action" is a deterministic recommendation (a pure decision tree in
-`lib/services/next-action-service.ts`, not an AI call) for a human to act
-on manually.
+automatic contact of any business. Approving a draft only sets its status
+to `READY_TO_SEND`; nothing is dispatched, and the prospect's pipeline
+status is never changed automatically. The prospect page's "Next
+recommended action" is a deterministic recommendation (a pure decision
+tree in `lib/services/next-action-service.ts`, not an AI call) for a
+human to act on manually.
 
 The model defaults to `claude-opus-5`; override with `ANTHROPIC_MODEL` if
 you want a different cost/quality tradeoff.
@@ -220,15 +250,25 @@ yourself (see "Create your first user" above) — see `playwright.config.ts`
 and `tests/e2e/` for what's covered today.
 
 The AI-calling code paths (discovery, research, scoring, website audits,
-opportunity analysis) are unit-tested at the validation/logic layer (Zod
-schemas, score/priority classification, dedup matching, the audit-weighting
-math, the next-action decision tree) with mocked inputs and a fake Supabase
-client, since this environment has no `ANTHROPIC_API_KEY` configured to
-make a real call against. If you have a key, exercising `/leads` → Research
-→ Score → Audit Website once by hand is worth doing after pulling this
-branch — in particular, re-running Research or Audit Website on the same
-business a second time to confirm opportunities update in place
-(`times_detected` increments) instead of duplicating.
+opportunity analysis, sales strategy, outreach drafts) are unit-tested at
+the validation/logic layer (Zod schemas, score/priority classification,
+dedup matching, the audit-weighting math, the next-action decision tree,
+opportunity/contact/channel selection, message validation and
+personalization scoring, the draft lifecycle) with mocked inputs and a
+fake Supabase client, since this environment has no `ANTHROPIC_API_KEY`
+configured to make a real call against. If you have a key, exercising
+`/leads` → Research → Score → Audit Website → Generate Outreach once by
+hand is worth doing after pulling this branch — in particular:
+- re-running Research or Audit Website on the same business a second time
+  to confirm opportunities update in place (`times_detected` increments)
+  instead of duplicating;
+- re-running Generate Outreach on the same business to confirm it reuses
+  the existing drafts rather than silently creating duplicates, and that
+  Regenerate creates fresh ones without deleting the old ones;
+- reading a generated message and judging honestly whether it reads like
+  it was actually researched, or like generic AI spam (see the Phase 4
+  report's "realistic message quality" section for how this was assessed
+  without a live key).
 
 ## Deployment (Vercel)
 
@@ -260,6 +300,41 @@ business a second time to confirm opportunities update in place
 - **New user can't see any data**: RLS requires an authenticated session;
   confirm the user was created via the Dashboard (not some other path) and
   that `public.profiles` has a matching row.
+
+## Known limitations (Phase 4)
+
+- **Message validation is rule-based, not semantic.** It reliably catches
+  unfilled placeholders, banned generic phrases, excessive/too-short
+  length, suspicious URLs, a numeric claim untraceable to recorded
+  evidence, and a missing business/contact/evidence reference - it cannot
+  verify deep factual accuracy. This is exactly why human approval is
+  still mandatory regardless of whether validation passes.
+- **Generate Outreach targets one channel per click** (whichever
+  `determineChannel` recommends), not both WhatsApp and email - a
+  deliberate cost/scope decision (spec section 24: no accidental bulk
+  generation). Regenerate re-runs the same channel; there's no button yet
+  to also draft the other channel.
+- **No bulk outreach generation** - one prospect at a time, matching the
+  spec's explicit cost-control requirement.
+- **APPROVED and READY_TO_SEND are collapsed into one action.** The single
+  Approve button sets a draft straight to `READY_TO_SEND` (matching the
+  spec's own flow diagram: "user approves → becomes READY_TO_SEND"); the
+  `APPROVED` enum value exists in the database for a possible future
+  two-step review but nothing in this phase's UI produces it. Worth
+  flagging in case a two-step review was actually intended.
+- **The `products` table is business lines, not a services catalog** (2
+  rows: Zviko Labs, Dating App). Spec section 29's "existing product/
+  service structure" is interpreted as `opportunity_type` - the enum
+  already used throughout Phases 2-3 as Zviko Labs' service categories -
+  plus the opportunity's own `recommended_service` text; `NO_MATCHING_SERVICE`
+  is returned only when neither is usable, never an invented service name.
+- Sales strategies and outreach drafts are never deleted, only superseded/
+  cancelled - full history stays on the business (consistent with audits
+  and opportunities).
+- As with Phase 1-3, there's no automated authenticated end-to-end test for
+  the new sales-intelligence/outreach UI - see "Testing" above for what is
+  covered, and no live AI verification was possible this session (no
+  `ANTHROPIC_API_KEY` configured) - see the Phase 4 report.
 
 ## Known limitations (Phase 3)
 
@@ -297,7 +372,11 @@ business a second time to confirm opportunities update in place
 
 ## Roadmap
 
-See `PROJECT_AUDIT.md` for the full phase plan (Phase 4: Sales
-Intelligence, Phase 5: Dating App Growth, Phase 6: Signatures, Phase 7:
-Marketing Intelligence, Phase 8: AI Growth Advisor, Phase 9: Automation,
-Phase 10: Production Hardening).
+Phase 5 is actual outreach sending (WhatsApp Business Platform + an email
+provider, against the `OutreachProvider` interface prepared in this
+phase) - per this phase's explicit instructions. Note this differs from
+`PROJECT_AUDIT.md`'s original Phase 0 plan, where Phase 5 was Dating App
+Growth; see the Phase 4 report for this discrepancy. Beyond sending, see
+`PROJECT_AUDIT.md` for the rest of the phase plan (Dating App Growth,
+Signatures, Marketing Intelligence, AI Growth Advisor, Automation,
+Production Hardening).

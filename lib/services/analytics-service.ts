@@ -114,6 +114,55 @@ export function summarizePipeline(businesses: PipelineStatsInput): PipelineStats
   }
 }
 
+export type OutreachStats = {
+  qualifiedProspects: number
+  prospectsWithOpportunities: number
+  prospectsReadyForOutreach: number
+  draftsAwaitingReview: number
+  approvedDrafts: number
+  highPriorityOpportunities: number
+}
+
+// Real database counts only - no fabricated numbers (spec section 34).
+// "Ready for outreach" and "with opportunities" are computed as distinct
+// businesses, not row counts, since a business can have several
+// opportunities/one active strategy.
+export async function getOutreachStats(supabase: SupabaseClient<Database>): Promise<OutreachStats> {
+  const [qualifiedResult, opportunitiesResult, strategiesResult, needsReviewResult, approvedResult, highPriorityResult] =
+    await Promise.all([
+      supabase.from("businesses").select("*", { count: "exact", head: true }).eq("pipeline_status", "QUALIFIED"),
+      supabase.from("opportunities").select("business_id").not("status", "eq", "REJECTED").not("status", "eq", "CLOSED"),
+      supabase.from("sales_strategies").select("business_id, recommended_channel").eq("status", "ACTIVE"),
+      supabase.from("outreach_drafts").select("*", { count: "exact", head: true }).eq("status", "NEEDS_REVIEW"),
+      supabase.from("outreach_drafts").select("*", { count: "exact", head: true }).eq("status", "READY_TO_SEND"),
+      supabase.from("opportunities").select("status").in("priority", ["CRITICAL", "HIGH"]),
+    ])
+
+  if (qualifiedResult.error) throw new Error(`Failed to load qualified prospect count: ${qualifiedResult.error.message}`)
+  if (opportunitiesResult.error) throw new Error(`Failed to load opportunities: ${opportunitiesResult.error.message}`)
+  if (strategiesResult.error) throw new Error(`Failed to load sales strategies: ${strategiesResult.error.message}`)
+  if (needsReviewResult.error) throw new Error(`Failed to load drafts needing review: ${needsReviewResult.error.message}`)
+  if (approvedResult.error) throw new Error(`Failed to load approved drafts: ${approvedResult.error.message}`)
+  if (highPriorityResult.error) throw new Error(`Failed to load high-priority opportunities: ${highPriorityResult.error.message}`)
+
+  const prospectsWithOpportunities = new Set(opportunitiesResult.data.map((o) => o.business_id)).size
+  const prospectsReadyForOutreach = new Set(
+    strategiesResult.data.filter((s) => s.recommended_channel !== "NONE").map((s) => s.business_id)
+  ).size
+  const highPriorityOpportunities = highPriorityResult.data.filter(
+    (o) => o.status !== "REJECTED" && o.status !== "CLOSED"
+  ).length
+
+  return {
+    qualifiedProspects: qualifiedResult.count ?? 0,
+    prospectsWithOpportunities,
+    prospectsReadyForOutreach,
+    draftsAwaitingReview: needsReviewResult.count ?? 0,
+    approvedDrafts: approvedResult.count ?? 0,
+    highPriorityOpportunities,
+  }
+}
+
 export async function getPipelineStats(supabase: SupabaseClient<Database>): Promise<PipelineStats> {
   const { data, error } = await supabase
     .from("businesses")

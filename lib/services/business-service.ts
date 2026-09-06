@@ -5,6 +5,7 @@ import { normalizeBusinessName, normalizePhone, normalizeWebsite } from "@/lib/s
 import { findDuplicate, type DuplicateMatch } from "@/lib/services/deduplication-service"
 import { logActivity } from "@/lib/services/activity-service"
 import { listAuditHistory } from "@/lib/services/website-audit-service"
+import { selectPrimaryOpportunity } from "@/lib/services/opportunity-selection"
 
 export type CreateBusinessInput = {
   name: string
@@ -154,6 +155,13 @@ export type BusinessListFilters = {
   opportunityType?: Enums<"opportunity_type">
   neverContacted?: boolean
   recentlyAudited?: boolean
+  readyForOutreach?: boolean
+  hasSalesStrategy?: boolean
+  hasOutreachDraft?: boolean
+  needsReview?: boolean
+  hasApprovedDraft?: boolean
+  primaryOpportunityPriority?: Enums<"opportunity_priority">
+  minPersonalizationScore?: number
 }
 
 export type BusinessListSort =
@@ -170,16 +178,30 @@ export type BusinessListItem = Tables<"businesses"> & {
   opportunity_count: number
   opportunity_types: Enums<"opportunity_type">[]
   top_opportunity_score: number | null
+  primary_opportunity_priority: Enums<"opportunity_priority"> | null
   latest_audit: Pick<Tables<"website_audits">, "overall_score" | "audit_status" | "audited_at"> | null
+  has_active_sales_strategy: boolean
+  ready_for_outreach: boolean
+  has_outreach_draft: boolean
+  needs_review: boolean
+  has_approved_draft: boolean
+  top_personalization_score: number | null
 }
+
+type RawOpportunityProjection = Pick<
+  Tables<"opportunities">,
+  "score" | "opportunity_type" | "status" | "priority" | "business_impact_score" | "evidence_strength_score"
+>
 
 type RawBusinessListRow = Tables<"businesses"> & {
   lead_scores:
     | Pick<Tables<"lead_scores">, "total_score" | "classification" | "confidence">
     | Pick<Tables<"lead_scores">, "total_score" | "classification" | "confidence">[]
     | null
-  opportunities: Pick<Tables<"opportunities">, "score" | "opportunity_type">[] | null
+  opportunities: RawOpportunityProjection[] | null
   website_audits: Pick<Tables<"website_audits">, "overall_score" | "audit_status" | "audited_at">[] | null
+  sales_strategies: Pick<Tables<"sales_strategies">, "status" | "recommended_channel">[] | null
+  outreach_drafts: Pick<Tables<"outreach_drafts">, "status" | "personalization_score">[] | null
 }
 
 const RECENTLY_AUDITED_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
@@ -203,7 +225,7 @@ export async function listBusinesses(
   const { data, error } = await supabase
     .from("businesses")
     .select(
-      "*, lead_scores(total_score, classification, confidence), opportunities(score, opportunity_type), website_audits(overall_score, audit_status, audited_at)"
+      "*, lead_scores(total_score, classification, confidence), opportunities(score, opportunity_type, status, priority, business_impact_score, evidence_strength_score), website_audits(overall_score, audit_status, audited_at), sales_strategies(status, recommended_channel), outreach_drafts(status, personalization_score)"
     )
     .order("audited_at", { referencedTable: "website_audits", ascending: false })
     .returns<RawBusinessListRow[]>()
@@ -211,19 +233,36 @@ export async function listBusinesses(
   if (error) throw new Error(`Failed to load businesses: ${error.message}`)
 
   let items: BusinessListItem[] = data.map((row) => {
-    const { lead_scores, opportunities, website_audits, ...business } = row
+    const { lead_scores, opportunities, website_audits, sales_strategies, outreach_drafts, ...business } = row
     const leadScore = Array.isArray(lead_scores) ? (lead_scores[0] ?? null) : lead_scores
     const opps = opportunities ?? []
     const opportunityScores = opps
       .map((o) => o.score)
       .filter((score): score is number => score !== null)
+    const { primary } = selectPrimaryOpportunity(opps)
+
+    const strategies = sales_strategies ?? []
+    const activeStrategy = strategies.find((s) => s.status === "ACTIVE") ?? null
+
+    const drafts = outreach_drafts ?? []
+    const personalizationScores = drafts
+      .map((d) => d.personalization_score)
+      .filter((score): score is number => score !== null)
+
     return {
       ...business,
       lead_score: leadScore,
       opportunity_count: opps.length,
       opportunity_types: opps.map((o) => o.opportunity_type),
       top_opportunity_score: opportunityScores.length > 0 ? Math.max(...opportunityScores) : null,
+      primary_opportunity_priority: primary?.priority ?? null,
       latest_audit: website_audits?.[0] ?? null,
+      has_active_sales_strategy: activeStrategy !== null,
+      ready_for_outreach: activeStrategy !== null && activeStrategy.recommended_channel !== "NONE",
+      has_outreach_draft: drafts.length > 0,
+      needs_review: drafts.some((d) => d.status === "NEEDS_REVIEW"),
+      has_approved_draft: drafts.some((d) => d.status === "READY_TO_SEND"),
+      top_personalization_score: personalizationScores.length > 0 ? Math.max(...personalizationScores) : null,
     }
   })
 
@@ -281,6 +320,27 @@ export async function listBusinesses(
       const auditedAt = b.latest_audit?.audited_at
       return !!auditedAt && Date.now() - new Date(auditedAt).getTime() <= RECENTLY_AUDITED_WINDOW_MS
     })
+  }
+  if (filters.readyForOutreach) {
+    items = items.filter((b) => b.ready_for_outreach)
+  }
+  if (filters.hasSalesStrategy) {
+    items = items.filter((b) => b.has_active_sales_strategy)
+  }
+  if (filters.hasOutreachDraft) {
+    items = items.filter((b) => b.has_outreach_draft)
+  }
+  if (filters.needsReview) {
+    items = items.filter((b) => b.needs_review)
+  }
+  if (filters.hasApprovedDraft) {
+    items = items.filter((b) => b.has_approved_draft)
+  }
+  if (filters.primaryOpportunityPriority) {
+    items = items.filter((b) => b.primary_opportunity_priority === filters.primaryOpportunityPriority)
+  }
+  if (filters.minPersonalizationScore !== undefined) {
+    items = items.filter((b) => (b.top_personalization_score ?? -1) >= filters.minPersonalizationScore!)
   }
 
   switch (sort) {

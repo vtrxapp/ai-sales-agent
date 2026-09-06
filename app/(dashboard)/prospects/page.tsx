@@ -27,6 +27,13 @@ type SearchParams = {
   opportunity_type?: string
   never_contacted?: string
   recently_audited?: string
+  ready_for_outreach?: string
+  has_sales_strategy?: string
+  has_draft?: string
+  needs_review?: string
+  has_approved_draft?: string
+  primary_opportunity_priority?: string
+  min_personalization_score?: string
   sort?: string
   saved?: string
   duplicates?: string
@@ -54,6 +61,11 @@ export default async function ProspectsPage({
   )
     ? (params.opportunity_type as Enums<"opportunity_type">)
     : undefined
+  const primaryOpportunityPriority = Constants.public.Enums.opportunity_priority.includes(
+    params.primary_opportunity_priority as Enums<"opportunity_priority">
+  )
+    ? (params.primary_opportunity_priority as Enums<"opportunity_priority">)
+    : undefined
   const businesses = await listBusinesses(
     supabase,
     {
@@ -72,6 +84,13 @@ export default async function ProspectsPage({
       opportunityType,
       neverContacted: params.never_contacted === "on",
       recentlyAudited: params.recently_audited === "on",
+      readyForOutreach: params.ready_for_outreach === "on",
+      hasSalesStrategy: params.has_sales_strategy === "on",
+      hasOutreachDraft: params.has_draft === "on",
+      needsReview: params.needs_review === "on",
+      hasApprovedDraft: params.has_approved_draft === "on",
+      primaryOpportunityPriority,
+      minPersonalizationScore: params.min_personalization_score ? Number(params.min_personalization_score) : undefined,
     },
     sort
   )
@@ -157,6 +176,22 @@ export default async function ProspectsPage({
                   </option>
                 ))}
               </Select>
+              <Select name="primary_opportunity_priority" defaultValue={params.primary_opportunity_priority ?? ""}>
+                <option value="">Any primary opportunity priority</option>
+                {Constants.public.Enums.opportunity_priority.map((priority) => (
+                  <option key={priority} value={priority}>
+                    {priority}
+                  </option>
+                ))}
+              </Select>
+              <Input
+                name="min_personalization_score"
+                type="number"
+                min={0}
+                max={100}
+                placeholder="Min personalization score"
+                defaultValue={params.min_personalization_score}
+              />
               <Select name="sort" defaultValue={sort}>
                 <option value="discovered_desc">Recently discovered</option>
                 <option value="researched_desc">Recently researched</option>
@@ -210,6 +245,46 @@ export default async function ProspectsPage({
                   className="size-4"
                 />
                 Recently audited (30d)
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  name="ready_for_outreach"
+                  defaultChecked={params.ready_for_outreach === "on"}
+                  className="size-4"
+                />
+                Ready for outreach
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  name="has_sales_strategy"
+                  defaultChecked={params.has_sales_strategy === "on"}
+                  className="size-4"
+                />
+                Has sales strategy
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" name="has_draft" defaultChecked={params.has_draft === "on"} className="size-4" />
+                Has draft
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  name="needs_review"
+                  defaultChecked={params.needs_review === "on"}
+                  className="size-4"
+                />
+                Needs review
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  name="has_approved_draft"
+                  defaultChecked={params.has_approved_draft === "on"}
+                  className="size-4"
+                />
+                Approved
               </label>
             </div>
             <div className="flex gap-2">

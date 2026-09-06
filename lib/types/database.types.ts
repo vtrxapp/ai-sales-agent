@@ -567,6 +567,127 @@ export type Database = {
           },
         ]
       }
+      outreach_drafts: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          body: string
+          business_id: string
+          channel: Database["public"]["Enums"]["outreach_channel"]
+          contact_id: string | null
+          created_at: string
+          created_by: string | null
+          generated_at: string
+          id: string
+          is_user_edited: boolean
+          message_type: Database["public"]["Enums"]["outreach_message_type"]
+          model: string
+          opportunity_id: string
+          personalization_reasoning: Json
+          personalization_score: number | null
+          sales_strategy_id: string
+          status: Database["public"]["Enums"]["outreach_draft_status"]
+          subject: string | null
+          updated_at: string
+          validation_errors: Json
+          validation_status: Database["public"]["Enums"]["validation_status"]
+          variant: Database["public"]["Enums"]["outreach_variant"]
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          body: string
+          business_id: string
+          channel: Database["public"]["Enums"]["outreach_channel"]
+          contact_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          generated_at?: string
+          id?: string
+          is_user_edited?: boolean
+          message_type?: Database["public"]["Enums"]["outreach_message_type"]
+          model: string
+          opportunity_id: string
+          personalization_reasoning?: Json
+          personalization_score?: number | null
+          sales_strategy_id: string
+          status?: Database["public"]["Enums"]["outreach_draft_status"]
+          subject?: string | null
+          updated_at?: string
+          validation_errors?: Json
+          validation_status: Database["public"]["Enums"]["validation_status"]
+          variant: Database["public"]["Enums"]["outreach_variant"]
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          body?: string
+          business_id?: string
+          channel?: Database["public"]["Enums"]["outreach_channel"]
+          contact_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          generated_at?: string
+          id?: string
+          is_user_edited?: boolean
+          message_type?: Database["public"]["Enums"]["outreach_message_type"]
+          model?: string
+          opportunity_id?: string
+          personalization_reasoning?: Json
+          personalization_score?: number | null
+          sales_strategy_id?: string
+          status?: Database["public"]["Enums"]["outreach_draft_status"]
+          subject?: string | null
+          updated_at?: string
+          validation_errors?: Json
+          validation_status?: Database["public"]["Enums"]["validation_status"]
+          variant?: Database["public"]["Enums"]["outreach_variant"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "outreach_drafts_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outreach_drafts_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outreach_drafts_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outreach_drafts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outreach_drafts_opportunity_id_fkey"
+            columns: ["opportunity_id"]
+            isOneToOne: false
+            referencedRelation: "opportunities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outreach_drafts_sales_strategy_id_fkey"
+            columns: ["sales_strategy_id"]
+            isOneToOne: false
+            referencedRelation: "sales_strategies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       products: {
         Row: {
           active: boolean
@@ -629,6 +750,122 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      sales_strategies: {
+        Row: {
+          business_id: string
+          confidence: number | null
+          contact_reason: string
+          created_at: string
+          evidence_type: Database["public"]["Enums"]["evidence_type"]
+          expected_business_benefit: string
+          generated_at: string
+          generated_by: string | null
+          id: string
+          model: string
+          objection_considerations: Json
+          opening_strategy: string
+          opportunity_id: string
+          primary_problem: string
+          priority: Database["public"]["Enums"]["opportunity_priority"]
+          recommended_channel: Database["public"]["Enums"]["recommended_channel"]
+          recommended_service: string
+          recommended_solution: string
+          sales_angle: string
+          status: Database["public"]["Enums"]["sales_strategy_status"]
+          supporting_evidence: string
+          target_contact_id: string | null
+          things_to_avoid: Json
+          updated_at: string
+          value_proposition: string
+          why_it_matters: string
+        }
+        Insert: {
+          business_id: string
+          confidence?: number | null
+          contact_reason: string
+          created_at?: string
+          evidence_type: Database["public"]["Enums"]["evidence_type"]
+          expected_business_benefit: string
+          generated_at?: string
+          generated_by?: string | null
+          id?: string
+          model: string
+          objection_considerations?: Json
+          opening_strategy: string
+          opportunity_id: string
+          primary_problem: string
+          priority: Database["public"]["Enums"]["opportunity_priority"]
+          recommended_channel: Database["public"]["Enums"]["recommended_channel"]
+          recommended_service: string
+          recommended_solution: string
+          sales_angle: string
+          status?: Database["public"]["Enums"]["sales_strategy_status"]
+          supporting_evidence: string
+          target_contact_id?: string | null
+          things_to_avoid?: Json
+          updated_at?: string
+          value_proposition: string
+          why_it_matters: string
+        }
+        Update: {
+          business_id?: string
+          confidence?: number | null
+          contact_reason?: string
+          created_at?: string
+          evidence_type?: Database["public"]["Enums"]["evidence_type"]
+          expected_business_benefit?: string
+          generated_at?: string
+          generated_by?: string | null
+          id?: string
+          model?: string
+          objection_considerations?: Json
+          opening_strategy?: string
+          opportunity_id?: string
+          primary_problem?: string
+          priority?: Database["public"]["Enums"]["opportunity_priority"]
+          recommended_channel?: Database["public"]["Enums"]["recommended_channel"]
+          recommended_service?: string
+          recommended_solution?: string
+          sales_angle?: string
+          status?: Database["public"]["Enums"]["sales_strategy_status"]
+          supporting_evidence?: string
+          target_contact_id?: string | null
+          things_to_avoid?: Json
+          updated_at?: string
+          value_proposition?: string
+          why_it_matters?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_strategies_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_strategies_generated_by_fkey"
+            columns: ["generated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_strategies_opportunity_id_fkey"
+            columns: ["opportunity_id"]
+            isOneToOne: false
+            referencedRelation: "opportunities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_strategies_target_contact_id_fkey"
+            columns: ["target_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       website_audits: {
         Row: {
@@ -762,6 +999,7 @@ export type Database = {
         | "PARTNERSHIP"
         | "REFERRAL"
       contact_verification_status: "VERIFIED" | "UNVERIFIED" | "UNKNOWN"
+      evidence_type: "OBSERVED" | "INFERRED"
       lead_classification:
         | "EXCEPTIONAL"
         | "HIGH"
@@ -790,6 +1028,16 @@ export type Database = {
         | "DASHBOARD"
         | "CUSTOM_SOFTWARE"
         | "OTHER"
+      outreach_channel: "WHATSAPP" | "EMAIL"
+      outreach_draft_status:
+        | "DRAFT"
+        | "NEEDS_REVIEW"
+        | "APPROVED"
+        | "READY_TO_SEND"
+        | "SENT"
+        | "CANCELLED"
+      outreach_message_type: "INITIAL_OUTREACH"
+      outreach_variant: "RECOMMENDED" | "DIRECT" | "CONVERSATIONAL"
       pipeline_status:
         | "NEW"
         | "QUALIFIED"
@@ -800,6 +1048,9 @@ export type Database = {
         | "WON"
         | "LOST"
       product_type: "ZVIKO_LABS" | "DATING_APP"
+      recommended_channel: "WHATSAPP" | "EMAIL" | "NONE"
+      sales_strategy_status: "ACTIVE" | "SUPERSEDED"
+      validation_status: "PASSED" | "FAILED"
       whatsapp_status: "AVAILABLE" | "NOT_AVAILABLE" | "UNKNOWN"
     }
     CompositeTypes: {
@@ -956,6 +1207,7 @@ export const Constants = {
         "REFERRAL",
       ],
       contact_verification_status: ["VERIFIED", "UNVERIFIED", "UNKNOWN"],
+      evidence_type: ["OBSERVED", "INFERRED"],
       lead_classification: ["EXCEPTIONAL", "HIGH", "MEDIUM", "LOW", "VERY_LOW"],
       opportunity_complexity: ["LOW", "MEDIUM", "HIGH"],
       opportunity_priority: ["HIGH", "MEDIUM", "LOW", "CRITICAL"],
@@ -981,6 +1233,17 @@ export const Constants = {
         "CUSTOM_SOFTWARE",
         "OTHER",
       ],
+      outreach_channel: ["WHATSAPP", "EMAIL"],
+      outreach_draft_status: [
+        "DRAFT",
+        "NEEDS_REVIEW",
+        "APPROVED",
+        "READY_TO_SEND",
+        "SENT",
+        "CANCELLED",
+      ],
+      outreach_message_type: ["INITIAL_OUTREACH"],
+      outreach_variant: ["RECOMMENDED", "DIRECT", "CONVERSATIONAL"],
       pipeline_status: [
         "NEW",
         "QUALIFIED",
@@ -992,6 +1255,9 @@ export const Constants = {
         "LOST",
       ],
       product_type: ["ZVIKO_LABS", "DATING_APP"],
+      recommended_channel: ["WHATSAPP", "EMAIL", "NONE"],
+      sales_strategy_status: ["ACTIVE", "SUPERSEDED"],
+      validation_status: ["PASSED", "FAILED"],
       whatsapp_status: ["AVAILABLE", "NOT_AVAILABLE", "UNKNOWN"],
     },
   },
