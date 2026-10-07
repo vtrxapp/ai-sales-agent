@@ -20,15 +20,15 @@ export type DiscoveryCriteriaInput = z.infer<typeof discoveryCriteriaSchema>
 
 export const manualBusinessSchema = z.object({
   name: z.string().trim().min(2, { error: "Name must be at least 2 characters." }).max(300),
-  industry: z.string().trim().max(200).optional().or(z.literal("")),
-  description: z.string().trim().max(2000).optional().or(z.literal("")),
-  location: z.string().trim().max(300).optional().or(z.literal("")),
-  city: z.string().trim().max(200).optional().or(z.literal("")),
-  country: z.string().trim().max(200).optional().or(z.literal("")),
-  website: z.url({ error: "Enter a valid URL." }).optional().or(z.literal("")),
-  phone: z.string().trim().max(50).optional().or(z.literal("")),
-  email: z.email({ error: "Enter a valid email." }).optional().or(z.literal("")),
-  source_url: z.url({ error: "Enter a valid URL." }).optional().or(z.literal("")),
+  industry: z.string().trim().max(200).nullish().or(z.literal("")),
+  description: z.string().trim().max(2000).nullish().or(z.literal("")),
+  location: z.string().trim().max(300).nullish().or(z.literal("")),
+  city: z.string().trim().max(200).nullish().or(z.literal("")),
+  country: z.string().trim().max(200).nullish().or(z.literal("")),
+  website: z.url({ error: "Enter a valid URL." }).nullish().or(z.literal("")),
+  phone: z.string().trim().max(50).nullish().or(z.literal("")),
+  email: z.email({ error: "Enter a valid email." }).nullish().or(z.literal("")),
+  source_url: z.url({ error: "Enter a valid URL." }).nullish().or(z.literal("")),
 })
 
 export type ManualBusinessInput = z.infer<typeof manualBusinessSchema>
@@ -36,12 +36,12 @@ export type ManualBusinessInput = z.infer<typeof manualBusinessSchema>
 export const contactFormSchema = z.object({
   business_id: z.uuid(),
   name: z.string().trim().min(2, { error: "Name must be at least 2 characters." }).max(200),
-  job_title: z.string().trim().max(200).optional().or(z.literal("")),
-  email: z.email({ error: "Enter a valid email." }).optional().or(z.literal("")),
-  phone: z.string().trim().max(50).optional().or(z.literal("")),
-  whatsapp_number: z.string().trim().max(50).optional().or(z.literal("")),
+  job_title: z.string().trim().max(200).nullish().or(z.literal("")),
+  email: z.email({ error: "Enter a valid email." }).nullish().or(z.literal("")),
+  phone: z.string().trim().max(50).nullish().or(z.literal("")),
+  whatsapp_number: z.string().trim().max(50).nullish().or(z.literal("")),
   whatsapp_status: z.enum(Constants.public.Enums.whatsapp_status).optional(),
-  social_url: z.url({ error: "Enter a valid URL." }).optional().or(z.literal("")),
+  social_url: z.url({ error: "Enter a valid URL." }).nullish().or(z.literal("")),
   verification_status: z.enum(Constants.public.Enums.contact_verification_status).optional(),
 })
 
@@ -51,9 +51,9 @@ export const opportunityFormSchema = z.object({
   business_id: z.uuid(),
   opportunity_type: z.enum(Constants.public.Enums.opportunity_type),
   title: z.string().trim().min(2, { error: "Title must be at least 2 characters." }).max(300),
-  description: z.string().trim().max(2000).optional().or(z.literal("")),
-  problem: z.string().trim().max(2000).optional().or(z.literal("")),
-  proposed_solution: z.string().trim().max(2000).optional().or(z.literal("")),
+  description: z.string().trim().max(2000).nullish().or(z.literal("")),
+  problem: z.string().trim().max(2000).nullish().or(z.literal("")),
+  proposed_solution: z.string().trim().max(2000).nullish().or(z.literal("")),
   priority: z.enum(Constants.public.Enums.opportunity_priority).optional(),
 })
 

@@ -57,6 +57,25 @@ describe("manualBusinessSchema", () => {
     const result = manualBusinessSchema.safeParse({ name: "ABC Gym", email: "not-an-email" })
     expect(result.success).toBe(false)
   })
+
+  // The quick-add form only submits name/website - every other field comes
+  // back as null (not undefined) via formData.get() on a field the form
+  // never rendered. optional() alone rejects null, so this must pass.
+  it("accepts null for fields the submitting form doesn't render", () => {
+    const result = manualBusinessSchema.safeParse({
+      name: "ABC Gym",
+      industry: null,
+      description: null,
+      location: null,
+      city: null,
+      country: null,
+      website: null,
+      phone: null,
+      email: null,
+      source_url: null,
+    })
+    expect(result.success).toBe(true)
+  })
 })
 
 describe("contactFormSchema", () => {
@@ -69,6 +88,21 @@ describe("contactFormSchema", () => {
   it("rejects a non-uuid business_id", () => {
     const result = contactFormSchema.safeParse({ business_id: "not-a-uuid", name: "Jane Doe" })
     expect(result.success).toBe(false)
+  })
+
+  // AddContactForm doesn't render whatsapp_number/social_url, so those come
+  // back as null via formData.get() rather than undefined.
+  it("accepts null for fields the add-contact form doesn't render", () => {
+    const result = contactFormSchema.safeParse({
+      business_id: businessId,
+      name: "Jane Doe",
+      job_title: null,
+      email: null,
+      phone: null,
+      whatsapp_number: null,
+      social_url: null,
+    })
+    expect(result.success).toBe(true)
   })
 })
 
@@ -91,5 +125,19 @@ describe("opportunityFormSchema", () => {
       title: "Online booking",
     })
     expect(result.success).toBe(false)
+  })
+
+  // AddOpportunityForm doesn't render a description field, so it comes back
+  // as null via formData.get() rather than undefined.
+  it("accepts null for fields the add-opportunity form doesn't render", () => {
+    const result = opportunityFormSchema.safeParse({
+      business_id: businessId,
+      opportunity_type: "BOOKING_SYSTEM",
+      title: "Online booking",
+      description: null,
+      problem: null,
+      proposed_solution: null,
+    })
+    expect(result.success).toBe(true)
   })
 })
